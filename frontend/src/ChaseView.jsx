@@ -8,6 +8,13 @@ import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { SIGNAL_STATUS, signalLabel } from "./routeStatus";
 import { SIGNAL_ICON } from "./icons";
 import { ROUTE_TRAFFIC_COLORS, carColor } from "./trafficColors";
+import {
+  POLICE_ACTIVE_COLOR,
+  POLICE_CLEARED_COLOR,
+  policeUnitLabels,
+  policeZones,
+  zoneSummary,
+} from "./policeZones";
 
 setWorkerUrl(maplibreWorkerUrl);
 
@@ -38,6 +45,20 @@ const SIREN_FLASH_MS = 450;
 // A tall glowing pillar marks the hospital from far away.
 const HOSPITAL_BEACON = { length: 10, width: 10, height: 45 };
 
+// Police: cars, station towers, accident beacons (metres).
+const POLICE_CAR = { length: 4.6, width: 1.9, height: 1.6 };
+const STATION_TOWER = { length: 7, width: 7, height: 28 };
+const CRASH_BEACON = { length: 5, width: 5, height: 22 };
+const CRASHED_CAR_COLOR = "#f97316";
+
+// Police station tower colour by what the station is doing.
+const STATION_COLORS = {
+  available: "#1d4ed8",
+  alerted: "#f59e0b",
+  unit_en_route: "#3b82f6",
+  on_scene: "#14b8a6",
+};
+
 const EMPTY = { type: "FeatureCollection", features: [] };
 
 // A vehicle footprint: SUMO reports the FRONT of the vehicle and its
@@ -65,11 +86,15 @@ function footprint(latitude, longitude, heading, size) {
   return [...corners, corners[0]];
 }
 
+// Police cars are drawn separately (policeCarsGeoJson).
 function vehiclesGeoJson(vehicles) {
   return {
     type: "FeatureCollection",
     features: vehicles
-      .filter((vehicle) => vehicle.latitude != null)
+      .filter(
+        (vehicle) =>
+          vehicle.latitude != null && !vehicle.vehicle_id?.startsWith("police")
+      )
       .map((vehicle) => ({
         type: "Feature",
         geometry: {
@@ -84,8 +109,9 @@ function vehiclesGeoJson(vehicles) {
           ],
         },
         properties: {
-          color: vehicle.vehicle_id?.startsWith("police")
-            ? "#1d4ed8"
+          // Crashed cars (simulated accident) stand out in orange.
+          color: vehicle.vehicle_id?.startsWith("incident")
+            ? CRASHED_CAR_COLOR
             : carColor(vehicle.speed ?? 0),
         },
       })),
@@ -136,6 +162,169 @@ function hospitalGeoJson(point, name) {
 
 // Roof light bar: a short strip across the roof, behind the cab.
 const LIGHT_BAR = { length: 0.7, width: 1.9, back: 1.2 };
+
+// A point `back` metres behind (latitude, longitude) for this heading.
+function behind(latitude, longitude, heading, back) {
+  const angle = (heading * Math.PI) / 180;
+  return [
+    latitude - (Math.cos(angle) * back) / 111320,
+    longitude -
+      (Math.sin(angle) * back) /
+        (111320 * Math.cos((latitude * Math.PI) / 180)),
+  ];
+}
+
+// A centred square footprint (towers and beacons).
+function square(latitude, longitude, size) {
+  return footprint(latitude + size.length / 2 / 111320, longitude, 0, size);
+}
+
+// Police cars: body, flashing light bar, and a label with the station.
+function policeCarsGeoJson(vehicles, labels) {
+  const features = [];
+  for (const vehicle of vehicles) {
+    if (!vehicle.vehicle_id?.startsWith("police") || vehicle.latitude == null) {
+      continue;
+    }
+    const heading = vehicle.heading ?? 0;
+    const [barLatitude, barLongitude] = behind(
+      vehicle.latitude, vehicle.longitude, heading, 1.6
+    );
+    features.push(
+      {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            footprint(vehicle.latitude, vehicle.longitude, heading, POLICE_CAR),
+          ],
+        },
+        properties: { part: "body" },
+      },
+      {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [footprint(barLatitude, barLongitude, heading, LIGHT_BAR)],
+        },
+        properties: { part: "light-bar" },
+      },
+      {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [vehicle.longitude, vehicle.latitude],
+        },
+        properties: {
+          part: "label",
+          label: labels[vehicle.vehicle_id] || "Police",
+        },
+      }
+    );
+  }
+  return { type: "FeatureCollection", features };
+}
+
+// Roads the police manage (blue, pulsing) or have cleared (teal), and
+// labels: officers at work, before / after once cleared.
+function policeZonesGeoJson(zones) {
+  const features = [];
+  for (const zone of zones) {
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: zone.zone.map(([latitude, longitude]) => [longitude, latitude]),
+      },
+      properties: { active: zone.active },
+    });
+    const [latitude, longitude] =
+      zone.active && zone.unit_latitude != null
+        ? [zone.unit_latitude, zone.unit_longitude]
+        : zone.zone[Math.floor(zone.zone.length / 2)];
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [longitude, latitude] },
+      properties: {
+        active: zone.active,
+        label: zone.active
+          ? `Police directing traffic · ${zone.vehicles_waved} vehicles waved`
+          : `Cleared by police · ${zoneSummary(zone)}`,
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+// Simulated accidents: a red beacon while the road is blocked.
+function incidentsGeoJson(incidents) {
+  const features = [];
+  for (const incident of incidents) {
+    const blocked = incident.cleared_at == null;
+    if (blocked) {
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [square(incident.latitude, incident.longitude, CRASH_BEACON)],
+        },
+        properties: {},
+      });
+    }
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [incident.longitude, incident.latitude],
+      },
+      properties: {
+        label: blocked
+          ? incident.police_since != null
+            ? "Accident · police clearing it"
+            : "Accident · road blocked"
+          : incident.cleared_by === "police"
+            ? "Accident cleared by police"
+            : "Accident cleared",
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+// Police stations: a tower coloured by what the station is doing.
+function stationsGeoJson(stations, board) {
+  const live = Object.fromEntries(
+    (board?.stations || []).map((station) => [station.name, station])
+  );
+  const features = [];
+  for (const station of stations) {
+    const status = live[station.name]?.status || "available";
+    features.push(
+      {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [square(station.latitude, station.longitude, STATION_TOWER)],
+        },
+        properties: { color: STATION_COLORS[status] },
+      },
+      {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [station.longitude, station.latitude],
+        },
+        properties: {
+          label:
+            status === "available"
+              ? station.name
+              : `${station.name} · ${live[station.name].status_text}`,
+        },
+      }
+    );
+  }
+  return { type: "FeatureCollection", features };
+}
 
 function ambulanceGeoJson(ambulance) {
   if (ambulance?.latitude == null) return EMPTY;
@@ -309,6 +498,25 @@ function addLayers(map) {
     paint: { "line-color": ["get", "color"], "line-width": 9, "line-opacity": 0.8 },
   });
 
+  // Roads the police are managing (blue, pulsing) or have cleared (teal).
+  map.addSource("police-zones", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "police-zones-active",
+    type: "line",
+    source: "police-zones",
+    filter: ["all", ["==", ["geometry-type"], "LineString"], ["get", "active"]],
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": POLICE_ACTIVE_COLOR, "line-width": 22, "line-opacity": 0.55 },
+  });
+  map.addLayer({
+    id: "police-zones-cleared",
+    type: "line",
+    source: "police-zones",
+    filter: ["all", ["==", ["geometry-type"], "LineString"], ["!", ["get", "active"]]],
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": POLICE_CLEARED_COLOR, "line-width": 16, "line-opacity": 0.45 },
+  });
+
   map.addSource("hospital", { type: "geojson", data: EMPTY });
   map.addLayer({
     id: "hospital-beacon",
@@ -347,6 +555,62 @@ function addLayers(map) {
       "fill-extrusion-color": ["get", "color"],
       "fill-extrusion-height": CAR.height,
       "fill-extrusion-opacity": 0.95,
+    },
+  });
+
+  // Police cars: blue and white body, flashing red / blue light bar.
+  map.addSource("police-cars", { type: "geojson", data: EMPTY });
+  [
+    ["police-car-lower", "#1d4ed8", 0, 0.9],
+    ["police-car-upper", "#f8fafc", 0.9, POLICE_CAR.height],
+  ].forEach(([id, color, base, height]) => {
+    map.addLayer({
+      id,
+      type: "fill-extrusion",
+      source: "police-cars",
+      filter: ["==", ["get", "part"], "body"],
+      paint: {
+        "fill-extrusion-color": color,
+        "fill-extrusion-base": base,
+        "fill-extrusion-height": height,
+      },
+    });
+  });
+  map.addLayer({
+    id: "police-car-light-bar",
+    type: "fill-extrusion",
+    source: "police-cars",
+    filter: ["==", ["get", "part"], "light-bar"],
+    paint: {
+      "fill-extrusion-color": SIREN_COLORS[1],
+      "fill-extrusion-base": POLICE_CAR.height,
+      "fill-extrusion-height": POLICE_CAR.height + 0.35,
+    },
+  });
+
+  // Police station towers and accident beacons.
+  map.addSource("police-stations", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "police-station-towers",
+    type: "fill-extrusion",
+    source: "police-stations",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: {
+      "fill-extrusion-color": ["get", "color"],
+      "fill-extrusion-height": STATION_TOWER.height,
+      "fill-extrusion-opacity": 0.7,
+    },
+  });
+  map.addSource("incidents", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "incident-beacons",
+    type: "fill-extrusion",
+    source: "incidents",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: {
+      "fill-extrusion-color": "#dc2626",
+      "fill-extrusion-height": CRASH_BEACON.height,
+      "fill-extrusion-opacity": 0.75,
     },
   });
 
@@ -441,6 +705,31 @@ function addLayers(map) {
     },
   });
 
+  // Labels: police stations, accidents, officers / cleared roads,
+  // police cars.
+  const label = (id, source, filter, color, halo, size, offset) => {
+    map.addLayer({
+      id,
+      type: "symbol",
+      source,
+      filter,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": size,
+        "text-offset": [0, offset],
+        "text-max-width": 22,
+        "text-allow-overlap": true,
+      },
+      paint: { "text-color": color, "text-halo-color": halo, "text-halo-width": 2.5 },
+    });
+  };
+  const points = ["==", ["geometry-type"], "Point"];
+  label("police-station-labels", "police-stations", points, "#dbeafe", "#1e3a8a", 12, -2.2);
+  label("incident-labels", "incidents", points, "#ffffff", "#b91c1c", 14, -2.2);
+  label("police-zone-labels", "police-zones", points, "#ffffff", "#1e40af", 13, -1.6);
+  label("police-car-labels", "police-cars", ["==", ["get", "part"], "label"], "#ffffff", "#1d4ed8", 12, -1.8);
+
   // Floating label above the ambulance (drawn last, always on top).
   map.addLayer({
     id: "ambulance-label",
@@ -474,6 +763,11 @@ function ChaseView({
   routeTraffic = [],
   hospitalPoint,
   hospitalName,
+  policeWatch,
+  response,
+  incidents = [],
+  policeStations = [],
+  policeBoard,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -529,6 +823,10 @@ function ChaseView({
         "ambulance-light-bar", "fill-extrusion-color", SIREN_COLORS[lit]
       );
       map.setPaintProperty("ambulance-halo", "circle-color", SIREN_COLORS[lit]);
+      map.setPaintProperty(
+        "police-car-light-bar", "fill-extrusion-color", SIREN_COLORS[1 - lit]
+      );
+      map.setPaintProperty("police-zones-active", "line-opacity", lit ? 0.3 : 0.6);
     }, SIREN_FLASH_MS);
     return () => clearInterval(timer);
   }, [ready]);
@@ -555,9 +853,35 @@ function ChaseView({
 
   useEffect(() => {
     if (ready) {
-      mapRef.current.getSource("vehicles").setData(vehiclesGeoJson(vehicles));
+      const map = mapRef.current;
+      map.getSource("vehicles").setData(vehiclesGeoJson(vehicles));
+      map
+        .getSource("police-cars")
+        .setData(policeCarsGeoJson(vehicles, policeUnitLabels(policeWatch, response)));
     }
-  }, [ready, vehicles]);
+  }, [ready, vehicles, policeWatch, response]);
+
+  useEffect(() => {
+    if (ready) {
+      mapRef.current
+        .getSource("police-zones")
+        .setData(policeZonesGeoJson(policeZones(policeWatch, response)));
+    }
+  }, [ready, policeWatch, response]);
+
+  useEffect(() => {
+    if (ready) {
+      mapRef.current.getSource("incidents").setData(incidentsGeoJson(incidents));
+    }
+  }, [ready, incidents]);
+
+  useEffect(() => {
+    if (ready) {
+      mapRef.current
+        .getSource("police-stations")
+        .setData(stationsGeoJson(policeStations, policeBoard));
+    }
+  }, [ready, policeStations, policeBoard]);
 
   useEffect(() => {
     if (ready) {

@@ -16,3 +16,6 @@ _archive/
 # Logs and OS files
 *.log
 .DS_Store
+
+# Test phone numbers for police calls (personal numbers: never commit)
+police_contacts.json

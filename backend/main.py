@@ -9,6 +9,8 @@ from backend.models.ambulance import Ambulance
 from backend.models.hospital import Hospital
 from backend.models.emergency import Emergency
 from backend.models.traffic_signal import TrafficSignal
+from backend.models.police_station import PoliceStation
+from backend.models.police_call import PoliceCall
 
 from backend.api.routes.general import router as general_router
 from backend.api.routes.ambulance import router as ambulance_router
@@ -19,9 +21,13 @@ from backend.api.routes.corridor import router as corridor_router
 from backend.api.routes.traffic_signal import router as traffic_signal_router
 from backend.api.routes.simulation import router as simulation_router
 from backend.api.routes.planning import router as planning_router
+from backend.api.routes.police import router as police_router
 from backend.mcp_server import mcp
 
 from fastapi.middleware.cors import CORSMiddleware
+
+from backend.services.police_station_service import ensure_schema, sync_stations
+from simulation.sumo import route_planner
 
 # Show the simulation's and corridor's progress messages in the terminal.
 logging.basicConfig(
@@ -57,6 +63,16 @@ app.add_middleware(
 # Create database tables registered with SQLAlchemy.
 Base.metadata.create_all(bind=engine)     #only creates tables for models that SQLAlchemy knows about.
 
+# Police stations: add new columns to an older table, then copy the
+# stations of the simulated area in (their phone numbers are kept).
+try:
+    ensure_schema()
+    logging.getLogger(__name__).info(
+        "Police stations in the database: %d", sync_stations(route_planner.police_stations())
+    )
+except Exception as error:
+    logging.getLogger(__name__).warning("Could not sync police stations: %s", error)
+
 
 # Register application routes.
 app.include_router(general_router) #says hello, and /db-check checks the database is awake.
@@ -68,6 +84,7 @@ app.include_router(corridor_router) #show me the corridor for this ambulance rig
 app.include_router(traffic_signal_router) #add or look up a light, or change its state.
 app.include_router(simulation_router) #start or stop the pretend city, get its state, and the /ws walkie-talkie that sends live updates.
 app.include_router(planning_router) #find places, list hospitals and plan the fastest ambulance route.
+app.include_router(police_router) #police stations, their contact numbers, and the log of police calls.
 
 # MCP server for AI agents at /mcp. Mounted last so it never hides the routes above.
 app.mount("/", mcp_app)

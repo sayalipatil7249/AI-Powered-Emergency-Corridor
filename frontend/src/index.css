@@ -260,7 +260,7 @@ p {
 .map-overlay-top {
   top: 14px;
   left: 14px;
-  right: 320px;
+  right: 340px;
   pointer-events: none;
 }
 
@@ -286,6 +286,8 @@ p {
 .map-legend {
   left: 14px;
   bottom: 14px;
+  /* Stay clear of the right-side column (.map-side). */
+  max-width: calc(100% - 358px);
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -799,11 +801,6 @@ p {
 
 /* ================= AI agent feed (on the map) ================= */
 
-.map-overlay-agent {
-  right: 14px;
-  bottom: 14px;
-  width: min(360px, calc(100% - 28px));
-}
 
 .agent-feed {
   padding: 12px 14px;
@@ -1027,14 +1024,49 @@ p {
 /* ================= Live traffic card (on the map) ================= */
 
 /* Top-right column: view switch, follow toggle, live traffic */
-.map-controls {
+/* Right side of the map, top to bottom: controls, cards (scrolling when
+   there are many), AI agent feed - one column, so nothing overlaps. */
+.map-side {
   top: 14px;
   right: 14px;
+  bottom: 14px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: 8px;
-  width: min(290px, calc(100% - 28px));
+  width: min(310px, calc(100% - 28px));
+  /* Empty parts of the column let clicks through to the map. */
+  pointer-events: none;
+}
+
+.map-side > * {
+  pointer-events: auto;
+}
+
+.map-side-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+}
+
+.map-side-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.map-side-cards > * {
+  flex: none;
+}
+
+.map-side .agent-feed {
+  flex: none;
+  margin-top: auto;
 }
 
 .view-toggle {
@@ -1206,4 +1238,285 @@ p {
   transform: translateX(-50%);
   z-index: 5;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Police for the stretches of the route without signals */
+.legend-line.legend-dashed {
+  height: 0;
+  border-top: 3px dashed currentColor;
+  border-radius: 0;
+}
+
+.map-place.route-station {
+  filter: drop-shadow(0 0 5px rgba(192, 132, 252, 0.9));
+}
+
+.agent-message.kind-police {
+  border-left-color: #3b82f6;
+}
+
+.police-alerts {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.police-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 0 5px 8px;
+  border-left: 3px solid #3b82f6;
+}
+
+.police-alert + .police-alert {
+  margin-top: 4px;
+}
+
+.police-alert.status-PASSED,
+.police-alert.status-CANCELLED {
+  border-left-color: var(--waiting);
+  opacity: 0.75;
+}
+
+.police-alert strong {
+  color: var(--text);
+}
+
+.police-alert .muted,
+.police-call {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.plan-police ul {
+  margin: 3px 0 0;
+  padding-left: 16px;
+}
+
+.plan-police strong {
+  font-size: 12px;
+}
+
+/* Moving markers: the ambulance turns to face where it drives */
+.map-heading {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.4s ease-out;
+}
+
+/* Police car with its siren on: red / blue flashes */
+.map-police-unit.siren {
+  animation: siren 0.8s steps(1) infinite;
+}
+
+@keyframes siren {
+  0% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.75), 0 0 14px 4px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.85), 0 0 14px 4px rgba(59, 130, 246, 0.55);
+  }
+}
+
+/* Police stations by what they are doing */
+.map-place.station-alerted {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.9);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.map-place.station-unit_en_route {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.9);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.map-place.station-on_scene {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.95);
+}
+
+.map-crash {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Roads the police are managing now: a slowly pulsing band */
+.police-zone-active {
+  animation: zone-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes zone-pulse {
+  50% {
+    stroke-opacity: 0.15;
+  }
+}
+
+/* Station details popup (click a station) */
+.map .leaflet-popup-content-wrapper,
+.map .leaflet-popup-tip {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.map .leaflet-popup-content {
+  margin: 10px 12px;
+}
+
+.map .leaflet-popup-close-button {
+  color: var(--muted);
+}
+
+.station-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 200px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.station-popup strong {
+  font-size: 13px;
+}
+
+.station-popup .muted {
+  color: var(--muted);
+}
+
+.station-state {
+  font-weight: 700;
+  color: var(--green);
+}
+
+.station-state.status-alerted {
+  color: var(--ready);
+}
+
+.station-state.status-unit_en_route {
+  color: #60a5fa;
+}
+
+.station-state.status-on_scene {
+  color: #2dd4bf;
+}
+
+/* Nearby police card */
+.police-mini-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+.nearby-police {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nearby-police li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 3px 0;
+}
+
+.nearby-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.nearby-time {
+  flex: none;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.police-subheading {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.police-quiet {
+  margin: 0;
+}
+
+.nearby-police .muted {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.station-status {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.station-status.status-alerted {
+  background: var(--ready);
+}
+
+.station-status.status-unit_en_route {
+  background: #3b82f6;
+}
+
+.station-status.status-on_scene {
+  background: #14b8a6;
+}
+
+.station-task {
+  color: #93c5fd;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.incident-button {
+  width: 100%;
+  padding: 8px 12px;
+  border-color: rgba(220, 38, 38, 0.55);
+  background: rgba(127, 29, 29, 0.85);
+  color: #fee2e2;
+  font-size: 13px;
+}
+
+.incident-button:not(:disabled):hover {
+  background: rgba(185, 28, 28, 0.95);
+}
+
+.incident-button:disabled {
+  border-color: var(--border);
+  background: rgba(17, 24, 39, 0.9);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-police-unit.siren,
+  .map-place.station-alerted,
+  .map-place.station-unit_en_route,
+  .map-crash,
+  .police-zone-active,
+  .map-heading {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.police-road {
+  color: var(--text);
+  font-size: 12px;
 }

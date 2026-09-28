@@ -53,3 +53,19 @@ export const AMBULANCE_ICON = `
   <circle cx="6" cy="17" r="2" fill="#0f172a" stroke="#ffffff" stroke-width="1.2" />
   <circle cx="17" cy="17" r="2" fill="#0f172a" stroke="#ffffff" stroke-width="1.2" />
 </svg>`;
+
+// Simulated accident: a red octagon with an exclamation mark.
+export const CRASH_ICON = `
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M8 1.8h8l6.2 6.2v8L16 22.2H8L1.8 16V8z" fill="#dc2626"
+    stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" />
+  <path d="M10.8 6h2.4l-.4 8h-1.6zm0 9.6h2.4V18h-2.4z" fill="#ffffff" />
+</svg>`;
+
+// A road the police cleared: a teal circle with a tick.
+export const CLEARED_ICON = `
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <circle cx="12" cy="12" r="10" fill="#0d9488" stroke="#ffffff" stroke-width="1.6" />
+  <path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#ffffff" stroke-width="2.4"
+    stroke-linecap="round" stroke-linejoin="round" />
+</svg>`;

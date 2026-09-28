@@ -3,7 +3,10 @@ import asyncio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from backend.api.routes.planning import TripRequest, plan_trip
-from backend.services.simulation_service import simulation_service
+from backend.services.simulation_service import (
+    SimulationNotRunning,
+    simulation_service,
+)
 
 
 router = APIRouter(
@@ -30,6 +33,8 @@ def start_simulation(trip: TripRequest | None = None):
         "arrival_position": planned["arrival_position"],
         "start_name": trip.start.name or "Selected start",
         "hospital_name": planned["hospital_name"],
+        "stretches": planned["signalless_stretches"],
+        "police_along_route": planned["police_along_route"],
         "start_point": [trip.start.latitude, trip.start.longitude],
         "hospital_point": [trip.hospital.latitude, trip.hospital.longitude],
     })
@@ -42,6 +47,19 @@ def set_playback_speed(speed: int):
         return simulation_service.set_playback_speed(speed)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
+
+
+@router.post("/incident")
+def simulate_incident():
+    """
+    Demo: a crash blocks a road without signals ahead of the ambulance.
+    The police watch notices the jam, alerts (phones) the station, and
+    the officers clear the crash when they arrive.
+    """
+    try:
+        return simulation_service.create_incident()
+    except (ValueError, SimulationNotRunning, TimeoutError) as error:
+        raise HTTPException(status_code=409, detail=str(error))
 
 
 @router.get("/state")

@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from simulation.sumo import route_planner
+from backend.services.police_station_service import contacts_by_name
 
 router = APIRouter(
     prefix="/plan",
@@ -52,9 +53,18 @@ def get_hospitals():
 
 @router.get("/police")
 def get_police_stations():
-    """Police stations that can be sent to clear a jam for the ambulance."""
+    """Police stations that can be sent to clear a jam for the ambulance,
+    with their contact number from the database (partly hidden)."""
+    phones = contacts_by_name()
     return [
-        {key: station[key] for key in ("name", "latitude", "longitude")}
+        {
+            **{
+                key: station[key]
+                for key in ("name", "name_local", "kind", "road_name",
+                            "latitude", "longitude")
+            },
+            "phone": phones.get(station["name"]),
+        }
         for station in route_planner.police_stations()
     ]
 
@@ -149,5 +159,10 @@ def plan_trip(trip: TripRequest):
 
 @router.post("/route")
 def plan_route(trip: TripRequest):
-    """The fastest ambulance route from the start point to the hospital."""
-    return plan_trip(trip)
+    """The fastest ambulance route from the start point to the hospital,
+    with the police stations along it and their contact numbers."""
+    plan = plan_trip(trip)
+    phones = contacts_by_name()
+    for station in plan.get("police_along_route", []):
+        station["phone"] = phones.get(station["name"])
+    return plan

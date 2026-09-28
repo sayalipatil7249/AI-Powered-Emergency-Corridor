@@ -5,6 +5,7 @@ const KIND_LABELS = {
   warning: "Warning",
   note: "Update",
   response: "Deadlock response",
+  police: "Police alert",
 };
 
 // Latest messages from the AI supervisor agent (agent/), newest first.

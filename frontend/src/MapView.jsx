@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -6,6 +6,7 @@ import {
   Polyline,
   Polygon,
   CircleMarker,
+  Popup,
   Tooltip,
   useMap,
   useMapEvents,
@@ -18,18 +19,33 @@ import "./leafletConfig";
 import {
   AMBULANCE_ICON,
   CHECK_ICON,
+  CLEARED_ICON,
+  CRASH_ICON,
   HOSPITAL_ICON,
   JAM_ICON,
   POLICE_ICON,
   SIGNAL_ICON,
   START_ICON,
 } from "./icons";
-import { SIGNAL_STATUS, signalLabel } from "./routeStatus";
+import { SIGNAL_STATUS, formatDuration, signalLabel } from "./routeStatus";
 import { ROUTE_TRAFFIC_COLORS, carColor } from "./trafficColors";
+import {
+  ACTIVE_ALERTS,
+  POLICE_ACTIVE_COLOR,
+  POLICE_CLEARED_COLOR,
+  policeZones,
+  zoneSummary,
+} from "./policeZones";
 import AgentFeed from "./components/AgentFeed";
 import ChaseView from "./ChaseView";
 import LiveTrafficCard from "./components/LiveTrafficCard";
+import MovingMarker from "./components/MovingMarker";
+import PoliceAlertCard from "./components/PoliceAlertCard";
 import ResponseCard from "./components/ResponseCard";
+
+// Stretches of the route without signals (police cover them).
+const NO_SIGNAL_COLOR = "#c084fc";
+
 
 // Colours for live (TomTom) traffic on the map.
 const LIVE_COLORS = {
@@ -43,26 +59,53 @@ const PUNE_CENTER = [18.523, 73.859];
 
 const LEGEND = ["GREEN", "TURNING", "READY", "WAITING", "PASSED"];
 
+// The ambulance turns to face where it is driving (MovingMarker).
 const ambulanceIcon = L.divIcon({
   className: "map-icon",
-  html: `<div class="map-ambulance">${AMBULANCE_ICON}</div>`,
+  html: `<div class="map-ambulance"><div class="map-heading">${AMBULANCE_ICON}</div></div>`,
   iconSize: [40, 40],
   iconAnchor: [20, 20],
 });
 
-const policeStationIcon = L.divIcon({
-  className: "map-icon",
-  html: `<div class="map-place">${POLICE_ICON}</div>`,
-  iconSize: [18, 18],
-  iconAnchor: [9, 9],
-});
+// Police stations: bigger when they cover this route or are busy, and
+// coloured by what they are doing (corridor/police_board.py).
+const stationIcons = {};
+function stationIcon(onRoute, status) {
+  const key = `${onRoute}-${status}`;
+  if (!stationIcons[key]) {
+    const size = onRoute || status !== "available" ? 26 : 18;
+    stationIcons[key] = L.divIcon({
+      className: "map-icon",
+      html: `<div class="map-place station-${status} ${
+        onRoute ? "route-station" : ""
+      }">${POLICE_ICON}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  }
+  return stationIcons[key];
+}
 
-// The police unit sent to a jam: bigger, with a pulsing ring.
+// The police unit sent to a jam: bigger, with a flashing siren.
 const policeUnitIcon = L.divIcon({
   className: "map-icon",
-  html: `<div class="map-police-unit">${POLICE_ICON}</div>`,
+  html: `<div class="map-police-unit siren">${POLICE_ICON}</div>`,
   iconSize: [30, 30],
   iconAnchor: [15, 15],
+});
+
+const crashIcon = L.divIcon({
+  className: "map-icon",
+  html: `<div class="map-place map-crash">${CRASH_ICON}</div>`,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+});
+
+const clearedIcon = L.divIcon({
+  className: "map-icon",
+  html: `<div class="map-place">${CLEARED_ICON}</div>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
 });
 
 const jamIcon = L.divIcon({
@@ -209,6 +252,13 @@ function MapView({
   routeStatuses = [],
   routeTraffic = [],
   policeStations = [],
+  routePolice = [],
+  stretches = [],
+  policeWatch,
+  policeBoard,
+  incidents = [],
+  onSimulateIncident,
+  incidentBusy = false,
   response,
   startPoint,
   hospitalPoint,
@@ -229,9 +279,25 @@ function MapView({
     (signal) => signal.status !== "PASSED"
   );
 
+  // Stations covering this route: "covers" says which roads, how fast.
+  const coverByStation = Object.fromEntries(
+    routePolice.map((station) => [station.name, station.covers])
+  );
+  const activeAlerts = (policeWatch?.alerts || []).filter((alert) =>
+    ACTIVE_ALERTS.includes(alert.status)
+  );
+  const liveStations = Object.fromEntries(
+    (policeBoard?.stations || []).map((station) => [station.name, station])
+  );
+  const zones = policeZones(policeWatch, response);
+
+  // Police zones are drawn as SVG (not canvas) so they can be animated.
+  const svgRenderer = useMemo(() => L.svg({ padding: 0.5 }), []);
+
   const start = startPoint || route[0];
   const hospital = hospitalPoint || route[route.length - 1];
   const arrived = ambulance?.status === "COMPLETED";
+  const driving = Boolean(ambulance) && !arrived;
 
   return (
     <div className={`map-wrapper ${pickMode ? "picking" : ""}`}>
@@ -245,6 +311,11 @@ function MapView({
             routeTraffic={routeTraffic}
             hospitalPoint={hospital}
             hospitalName={hospitalName}
+            policeWatch={policeWatch}
+            response={response}
+            incidents={incidents}
+            policeStations={policeStations}
+            policeBoard={policeBoard}
           />
         </div>
       )}
@@ -340,6 +411,27 @@ function MapView({
           />
         ))}
 
+        {/* Stretches without signals: dashed; the police watch them */}
+        {stretches.map((stretch) =>
+          stretch.geometry?.length > 1 ? (
+            <Polyline
+              key={`stretch-${stretch.number}`}
+              positions={stretch.geometry}
+              pathOptions={{
+                color: NO_SIGNAL_COLOR,
+                weight: stretch.state === "jammed" ? 4 : 2.5,
+                opacity: stretch.state === "passed" ? 0.35 : 0.95,
+                dashArray: "3 7",
+              }}
+            >
+              <Tooltip sticky>
+                No signal: {stretch.name} ({stretch.length_meters} m)
+                {stretch.state === "jammed" && " · jammed"}
+              </Tooltip>
+            </Polyline>
+          ) : null
+        )}
+
         {start && (
           <Marker position={start} icon={startIcon}>
             <Tooltip direction="top" offset={[0, -12]}>
@@ -358,17 +450,162 @@ function MapView({
         )}
 
         {/* Police stations that can be sent to clear a jam */}
-        {policeStations.map((station) => (
-          <Marker
-            key={`police-${station.name}`}
-            position={[station.latitude, station.longitude]}
-            icon={policeStationIcon}
+        {policeStations.map((station) => {
+          const covers = coverByStation[station.name];
+          const live = liveStations[station.name];
+          const status = live?.status || "available";
+          return (
+            <Marker
+              key={`police-${station.name}`}
+              position={[station.latitude, station.longitude]}
+              icon={stationIcon(Boolean(covers), status)}
+              zIndexOffset={covers || status !== "available" ? 500 : 0}
+            >
+              <Tooltip direction="top" offset={[0, -8]}>
+                {station.name}
+                {status !== "available" && ` · ${live.status_text}`}
+              </Tooltip>
+              {/* Click for details */}
+              <Popup>
+                <div className="station-popup">
+                  <strong>{station.name}</strong>
+                  {station.name_local && (
+                    <span lang="mr">{station.name_local}</span>
+                  )}
+                  <span className="muted">
+                    {station.kind || "Police"}
+                    {station.road_name && ` · on ${station.road_name}`}
+                  </span>
+                  <span className={station.phone ? "" : "muted"}>
+                    {station.phone
+                      ? `📞 ${station.phone} (contact in database)`
+                      : "No contact number saved"}
+                  </span>
+                  {live && (
+                    <span className={`station-state status-${status}`}>
+                      {live.status_text}
+                      {live.task_road && ` · ${live.task_road}`}
+                    </span>
+                  )}
+                  {live?.reach_seconds != null && (
+                    <span>
+                      Can reach the ambulance in ~
+                      {formatDuration(live.reach_seconds)} (live traffic)
+                    </span>
+                  )}
+                  {covers && (
+                    <span>
+                      Covers on this route:{" "}
+                      {covers
+                        .map(
+                          (cover) =>
+                            `${cover.road} (${Math.max(1, Math.round(cover.drive_seconds / 60))} min)`
+                        )
+                        .join(", ")}
+                    </span>
+                  )}
+                  {live?.jams_cleared > 0 && (
+                    <span>Jams cleared this trip: {live.jams_cleared}</span>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+
+        {/* Roads the police are managing now (animated) or have cleared */}
+        {zones.map((zone) => (
+          <Polyline
+            key={zone.key}
+            positions={zone.zone}
+            pathOptions={{
+              renderer: svgRenderer,
+              color: zone.active ? POLICE_ACTIVE_COLOR : POLICE_CLEARED_COLOR,
+              weight: zone.active ? 16 : 12,
+              opacity: zone.active ? 0.45 : 0.35,
+              lineCap: "round",
+              className: zone.active ? "police-zone-active" : "police-zone-cleared",
+            }}
           >
-            <Tooltip direction="top" offset={[0, -8]}>
-              {station.name}
+            <Tooltip sticky>
+              {zone.active
+                ? `Police managing traffic (${zone.station}) · ${zone.vehicles_waved} vehicles waved through`
+                : `Cleared by police (${zone.station}) · ${zoneSummary(zone)}`}
+            </Tooltip>
+          </Polyline>
+        ))}
+        {zones
+          .filter((zone) => !zone.active)
+          .map((zone) => (
+            <Marker
+              key={`${zone.key}-done`}
+              position={zone.zone[Math.floor(zone.zone.length / 2)]}
+              icon={clearedIcon}
+              zIndexOffset={1200}
+            >
+              <Tooltip direction="top" offset={[0, -10]}>
+                Cleared by police · {zone.road}
+                <br />
+                {zoneSummary(zone)}
+              </Tooltip>
+            </Marker>
+          ))}
+
+        {/* Simulated accidents */}
+        {incidents.map((incident) => (
+          <Marker
+            key={incident.incident_id}
+            position={[incident.latitude, incident.longitude]}
+            icon={incident.cleared_at == null ? crashIcon : clearedIcon}
+            zIndexOffset={1600}
+            opacity={incident.cleared_at == null ? 1 : 0.8}
+          >
+            <Tooltip
+              permanent={incident.cleared_at == null}
+              direction="left"
+              offset={[-14, 0]}
+            >
+              {incident.cleared_at == null
+                ? incident.police_since != null
+                  ? "Accident · police clearing it"
+                  : "Accident (simulated) · road blocked"
+                : incident.cleared_by === "police"
+                  ? "Accident cleared by police"
+                  : "Accident cleared"}
             </Tooltip>
           </Marker>
         ))}
+
+        {/* Jams on stretches without signals that police were called to */}
+        {activeAlerts.map((alert) => (
+          <Marker
+            key={`alert-${alert.alert_id}`}
+            position={[alert.latitude, alert.longitude]}
+            icon={jamIcon}
+            zIndexOffset={1500}
+          >
+            <Tooltip permanent direction="bottom" offset={[0, 12]}>
+              No signal, jammed: {alert.road}
+            </Tooltip>
+          </Marker>
+        ))}
+        {activeAlerts
+          .filter((alert) => alert.unit_latitude != null)
+          .map((alert) => (
+            <MovingMarker
+              key={`unit-${alert.alert_id}`}
+              position={[alert.unit_latitude, alert.unit_longitude]}
+              icon={policeUnitIcon}
+              zIndexOffset={1800}
+              trailColor={POLICE_ACTIVE_COLOR}
+            >
+              <Tooltip permanent direction="top" offset={[0, -16]}>
+                {alert.status === "ON_SCENE"
+                  ? "Police clearing traffic"
+                  : `Police from ${alert.station}`}
+              </Tooltip>
+            </MovingMarker>
+          ))}
 
         {/* Deadlock ahead that the AI responded to */}
         {response?.jam &&
@@ -386,17 +623,19 @@ function MapView({
 
         {/* The police unit on its way / at the jam */}
         {response?.police && response.police.stage !== "done" && (
-          <Marker
+          <MovingMarker
+            key={`response-${response.police.unit_id}`}
             position={[response.police.latitude, response.police.longitude]}
             icon={policeUnitIcon}
             zIndexOffset={1800}
+            trailColor={POLICE_ACTIVE_COLOR}
           >
             <Tooltip permanent direction="top" offset={[0, -16]}>
               {response.police.stage === "clearing"
                 ? "Police clearing traffic"
                 : `Police · ${Math.round(response.police.eta_seconds)} s away`}
             </Tooltip>
-          </Marker>
+          </MovingMarker>
         )}
 
         {/* Other vehicles */}
@@ -462,10 +701,12 @@ function MapView({
 
         {/* After arrival the ambulance is parked at the hospital marker */}
         {!arrived && ambulance?.latitude != null && ambulance?.longitude != null && (
-          <Marker
+          <MovingMarker
             position={[ambulance.latitude, ambulance.longitude]}
+            heading={ambulance.heading}
             icon={ambulanceIcon}
             zIndexOffset={2000}
+            trailColor="#f87171"
           >
             {ambulance.speed != null && ambulance.status !== "COMPLETED" && (
               <Tooltip
@@ -477,46 +718,72 @@ function MapView({
                 {Math.round(ambulance.speed * 3.6)} km/h
               </Tooltip>
             )}
-          </Marker>
+          </MovingMarker>
         )}
       </MapContainer>
 
       <div className="map-overlay map-overlay-top">{overlay}</div>
 
-      <div className="map-overlay map-controls">
-        <div className="view-toggle" role="group" aria-label="Map view">
-          <button
-            className={view === "map" ? "active" : ""}
-            onClick={() => setView("map")}
-          >
-            Map
-          </button>
-          <button
-            className={view === "chase" ? "active" : ""}
-            onClick={() => setView("chase")}
-          >
-            Chase view
-          </button>
+      {/* Right side, top to bottom: controls, cards (scroll when there
+          are many), AI agent feed. One column, so nothing overlaps. */}
+      <div className="map-overlay map-side">
+        <div className="map-side-controls">
+          <div className="view-toggle" role="group" aria-label="Map view">
+            <button
+              className={view === "map" ? "active" : ""}
+              onClick={() => setView("map")}
+            >
+              Map
+            </button>
+            <button
+              className={view === "chase" ? "active" : ""}
+              onClick={() => setView("chase")}
+            >
+              Chase view
+            </button>
+          </div>
+
+          {view === "map" && (
+            <label className="follow-toggle">
+              <input
+                type="checkbox"
+                checked={follow}
+                onChange={(event) => setFollow(event.target.checked)}
+              />
+              Follow ambulance
+            </label>
+          )}
+
+          {onSimulateIncident && (
+            <button
+              className="button incident-button"
+              onClick={onSimulateIncident}
+              disabled={incidentBusy || !driving}
+              title="Block a road without signals ahead of the ambulance, to see the police alert, the phone call and the police clearing it"
+            >
+              {incidentBusy
+                ? "Blocking a road…"
+                : driving
+                  ? "⚠ Simulate accident ahead"
+                  : "⚠ Accident: after the ambulance sets off"}
+            </button>
+          )}
         </div>
 
-        {view === "map" && (
-          <label className="follow-toggle">
-            <input
-              type="checkbox"
-              checked={follow}
-              onChange={(event) => setFollow(event.target.checked)}
-            />
-            Follow ambulance
-          </label>
-        )}
+        <div className="map-side-cards">
+          <LiveTrafficCard live={liveTraffic} tripRunning={Boolean(ambulance)} />
+          {driving && (
+            <>
+              <ResponseCard response={response} />
+              <PoliceAlertCard
+                policeWatch={policeWatch}
+                board={policeBoard}
+                stations={policeStations}
+              />
+            </>
+          )}
+        </div>
 
-        <LiveTrafficCard live={liveTraffic} tripRunning={Boolean(ambulance)} />
-        {ambulance && ambulance.status !== "COMPLETED" && (
-          <ResponseCard response={response} />
-        )}
-      </div>
-
-      <div className="map-overlay map-overlay-agent">
         <AgentFeed
           messages={agentFeed}
           departTime={ambulance?.depart_time}
@@ -538,6 +805,9 @@ function MapView({
           <li><span className="legend-line" style={{ background: ROUTE_TRAFFIC_COLORS.free }} />Clear</li>
           <li><span className="legend-line" style={{ background: ROUTE_TRAFFIC_COLORS.slow }} />Slow</li>
           <li><span className="legend-line" style={{ background: ROUTE_TRAFFIC_COLORS.jammed }} />Jammed</li>
+          <li><span className="legend-line legend-dashed" style={{ color: NO_SIGNAL_COLOR }} />No signal (police)</li>
+          <li><span className="legend-line" style={{ background: POLICE_ACTIVE_COLOR }} />Police managing</li>
+          <li><span className="legend-line" style={{ background: POLICE_CLEARED_COLOR }} />Cleared by police</li>
           <li className="legend-title">Cars</li>
           <li><span className="legend-swatch" style={{ background: carColor(10) }} />Moving</li>
           <li><span className="legend-swatch" style={{ background: carColor(0) }} />Stopped</li>

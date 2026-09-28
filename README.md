@@ -113,11 +113,12 @@ simulations and checks that a refactor did not change their results.
 │   ├── interfaces.py            The 3 connectors: AmbulanceTracker, TrafficSource, SignalController
 │   ├── engine.py                Finds signals ahead and turns the next one green
 │   ├── safety.py                Rules for early-green requests from AI agents
+│   ├── police_watch.py          Police alerts for jams on stretches without signals
 │   └── feed.py                  Builds the live state for the dashboard
 │
 ├── simulation/sumo/
 │   ├── adapters.py              SUMO versions of the 3 connectors (the only code using traci)
-│   ├── route_planner.py         Fastest ambulance route between any two points
+│   ├── route_planner.py         Fastest ambulance route; stretches without signals + police cover
 ├── simulation/live_traffic.py   Live TomTom traffic for the digital twin
 │   ├── sumo_bridge.py           SUMO start command, Pune speed limits, x/y → lat/lon
 │   └── pune_network_v2/         SUMO network and route files
@@ -255,6 +256,10 @@ Full interactive docs: http://localhost:8000/docs
 | GET | `/plan/search?q=` | Find places in the area (OpenStreetMap Nominatim) |
 | POST | `/plan/route` | Fastest ambulance route between a start point and a hospital |
 | POST | `/simulation/stop` | Stop the simulation |
+| POST | `/simulation/incident` | Demo: a crash blocks a road without signals ahead of the ambulance |
+| GET | `/police-stations/` | Police stations with their contact numbers (partly hidden) |
+| PUT | `/police-stations/{station_id}/phone` | Save or remove a station's contact number |
+| GET | `/police-stations/calls` | Log of police alerts and phone calls |
 | GET | `/simulation/state` | Latest simulation snapshot |
 | WS | `/simulation/ws` | Live simulation state, every 0.5 s |
 | POST | `/mcp` | MCP server for AI agents (see [AI layer](#ai-layer)) |
@@ -343,6 +348,83 @@ card; the MCP tool `get_deadlock_watch` lets an AI agent read it. Rebuild with
 `python -m ai.deadlock_experiments`, `python -m ai.train_deadlock`, and measure the effect with
 `python -m ai.response_experiments`.
 
+### Police for roads without signals (phone-call alerts)
+
+The corridor clears queues at signals by turning them green. On the parts of the route with
+**no signal** nothing can, so the police do it:
+
+1. **When the route is planned** (`route_planner.signalless_stretches` / `police_cover`), the
+   route is split into *stretches without signals* (dashed purple on the map). For each
+   stretch the police stations are ranked by **driving time on the road network**, not
+   straight-line distance (a station across the river can be close as the crow flies but far
+   by road). "Find fastest route" lists the stations that cover the route.
+2. **While the ambulance drives** (`corridor/police_watch.py`), every 5 s each stretch up to
+   3 km ahead is measured: how full of stopped vehicles its roads are and how slowly traffic
+   moves. Accidents, roadwork and heavy traffic all show up this way.
+3. When a stretch has been **jammed for 15 s**, and the ambulance is close enough that police
+   must leave now (within 5 min, or earlier if the police need longer), the fastest station
+   gets an **automatic phone call** (Twilio voice, Indian English, read twice):
+   *"An ambulance is approaching Ganesh Path in about 4 minutes. Traffic there is heavy.
+   Please send officers to clear the road."*
+4. A police car drives there in the simulation; on arrival the officers hold side traffic and
+   wave stuck vehicles through until the ambulance has passed.
+
+Alert: `ALERTED → EN_ROUTE → ON_SCENE → PASSED`, or `CANCELLED` when the jam clears by
+itself first. The "Police · roads without signals" card shows each alert and its call
+(ringing / answered / no answer); the MCP tool `get_police_alerts` lets an AI agent read it.
+
+**Tested:** with a crash placed 1.5 km ahead, the alert went out 16 s later while the
+ambulance was still about 2 minutes away.
+
+**Set up calls** (optional; without them alerts still appear on the dashboard):
+
+1. Create a Twilio account, verify your own phone, and enable **India** under
+   *Voice → Settings → Geo permissions*.
+2. In `.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` and
+   `POLICE_ALERT_PHONE` (your **test** phone). Per-station test phones go in
+   `police_contacts.json` (see `police_contacts.example.json`; not committed).
+3. Test one call: `python -m scripts.tests.test_police_call`. On a trial account, press any
+   key when the call starts to hear the message.
+
+**Never use real police numbers for testing:** a test call would be a false emergency. At
+most 3 calls are made per trip; `POLICE_CALLS=0` switches calls off.
+
+**Police contacts and the call log are stored in PostgreSQL:**
+
+| Table | What it holds |
+|---|---|
+| `police_stations` | The 11 stations of the area (from OpenStreetMap, synced at start-up): name, Marathi name, type (station / chowki), street, location (PostGIS point) and **`phone`**, the number called for alerts |
+| `police_calls` | Every police alert and its phone call: station, road, ambulance and police arrival times, alert status, number called (partly hidden) and where it came from, call status (ringing / answered / no answer...), stopped vehicles when officers arrived and when they left, vehicles waved through |
+
+Save the stations' (test) numbers either one at a time with
+`PUT /police-stations/{station_id}/phone` (e.g. from http://127.0.0.1:8000/docs), or all
+at once: copy `police_contacts.example.json` to `police_contacts.json`, fill it in and run
+`python -m scripts.set_police_phones`. A station without a number falls back to
+`POLICE_ALERT_PHONE`. `GET /police-stations/calls` lists the call log.
+
+**On the map:**
+
+- **Police stations** (click one for details): type (station or chowki), Marathi name, the
+  street it is on, what it is doing now (*Available / Alert received / Unit on the way /
+  Officers directing traffic*) and how fast its officers could reach the ambulance with live
+  traffic (`corridor/police_board.py`). The **Nearby police** card lists the three that could
+  reach it first, refreshed every 10 s.
+- **Police-managed traffic:** a pulsing blue band over the roads officers are controlling;
+  afterwards a teal **"Cleared by police"** band with a before/after, e.g. *stopped cars
+  74% → 0% · 25 vehicles waved through · 2 min 44 s on scene*.
+- **Chase view (3D):** police cars with a flashing light bar and their station's name,
+  station towers coloured by status, the managed (blue) and cleared (teal) roads with
+  labels, and a red beacon over a simulated accident.
+- **Moving markers:** the ambulance and police cars glide between updates, the ambulance
+  turns to face where it drives, police cars flash red/blue, and both leave a short trail.
+- **Simulate accident ahead** (button, while the ambulance drives): crashed vehicles block
+  every lane of a road without signals, far enough ahead that police can get there first.
+  A reported accident is alerted **at once** (no waiting for the queue to build up) and the
+  station is phoned; officers stuck in the queue within 250 m park and walk, and clear the
+  crash after 45 s. Tested: alert 0 s after the crash, officers on scene after 96 s, crash
+  cleared after 141 s, ambulance reached the spot about 5 minutes later on a clear road.
+  API: `POST /simulation/incident`.
+
 ### MCP server (tools for AI agents)
 
 The backend also serves an MCP server at **`http://127.0.0.1:8000/mcp`** (streamable HTTP),
@@ -358,6 +440,7 @@ Claude Code, …):
 | `get_upcoming_signals` | Next signals: distance, time to reach, light for the ambulance, queue, role |
 | `request_signal_priority` | **Ask** for early green at a signal ahead (checked by safety rules) |
 | `release_signal_priority` | Cancel a request |
+| `get_police_alerts` | Stretches without signals, police alerts and their phone calls |
 | `get_corridor_events` | Recent decisions and requests, with reasons |
 | `get_safety_rules` | The rules requests are checked against |
 
@@ -450,6 +533,12 @@ times match.
 - **Public services.** Route endpoints depend on the public OSRM and Overpass servers. If those
   are down, the endpoints return a `502` error.
 - **No authentication** on the API. It's intended for local demos only.
+- **Police cars get stuck in the jam they are sent to.** In the simulation a police car
+  reaching a jam from behind waits in the same queue (one test: 398 s instead of ~100 s).
+  Real officers would use the other lane or the footpath.
+- **Short jams are caught late.** In heavy traffic most jams on stretches without signals
+  form and clear within seconds; the ones that last often form just ahead of the ambulance,
+  so their alert is marked "police may arrive after the ambulance".
 
 ## Roadmap
 

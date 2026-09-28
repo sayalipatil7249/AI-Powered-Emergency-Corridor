@@ -30,11 +30,15 @@ from ai.eta_model import estimate as estimate_eta
 from ai.features import RouteCache
 from corridor import feed
 from corridor.engine import CorridorEngine
+from corridor.police_board import PoliceBoard
+from corridor.police_watch import SignallessWatch
 from corridor.response import DeadlockResponse
+from backend.services.police_notifier import police_notifier
 from simulation import live_traffic
 from simulation.sumo import route_planner
 from simulation.sumo.adapters import (
     SumoAmbulanceTracker,
+    SumoIncidents,
     SumoResponder,
     SumoSignalController,
     SumoSimulation,
@@ -79,6 +83,8 @@ class LiveContext:
     engine: CorridorEngine
     route_cache: object  # ai.features.RouteCache, None before departure
     response: object = None  # corridor/response.py, None before departure
+    police_watch: object = None  # corridor/police_watch.py, None before departure
+    incidents: object = None     # simulated accidents (SumoIncidents)
 
 
 class SimulationNotRunning(RuntimeError):
@@ -95,6 +101,8 @@ def demo_trip():
         "start_name": DEMO_START_NAME,
         "hospital_name": DEMO_HOSPITAL_NAME,
         "start_point": list(DEMO_START),
+        "stretches": plan["signalless_stretches"],
+        "police_along_route": plan["police_along_route"],
         "hospital_point": next(
             [item["latitude"], item["longitude"]]
             for item in route_planner.hospitals()
@@ -115,6 +123,9 @@ def _state(status, **values):
         "route_signals": [],
         "route_traffic": [],
         "response": None,
+        "police_watch": None,
+        "police_board": None,
+        "incidents": [],
         **values,
     }
 
@@ -165,6 +176,7 @@ class SimulationService:
         self._road_cache = {}
         self.latest_state = _state("starting")
         self.agent_feed.clear()
+        police_notifier.new_trip()
         self.running = True
 
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -211,10 +223,82 @@ class SimulationService:
                 "hospital_name": self.trip["hospital_name"],
                 "start_point": self.trip.get("start_point"),
                 "hospital_point": self.trip.get("hospital_point"),
+                "police_along_route": self.trip.get("police_along_route", []),
             },
             "live_traffic": self.live_info,
             "playback_speed": self.playback_speed,
         }
+
+    def _on_police_alert(self, alert):
+        """New police alert or status change (corridor/police_watch.py):
+        phone the station on a new alert, save every change in the
+        database (police_calls), and tell the dashboard."""
+
+        if alert["status"] == "ALERTED":
+            police_notifier.alert(alert)  # phones the station, saves the alert
+            self.add_agent_message(
+                f"Police alert → {alert['station']}: clear {alert['road']} "
+                f"(ambulance in ~{max(1, round(alert['ambulance_eta_seconds'] / 60))} min).",
+                kind="police",
+            )
+            return
+
+        police_notifier.record(alert)  # the new status, in police_calls
+        if alert["status"] in ("PASSED", "CANCELLED"):
+            self.add_agent_message(
+                f"Police alert for {alert['road']} closed: {alert['closed_reason']}.",
+                kind="police",
+            )
+
+    @staticmethod
+    def _police_summary(police_watch):
+        """The watch's state, with each alert's phone call status."""
+        if police_watch is None:
+            return None
+        summary = police_watch.summary()
+        for alert in summary["alerts"]:
+            alert["call"] = police_notifier.call_status(alert["alert_id"])
+        return summary
+
+    def create_incident(self):
+        """
+        "Simulate accident": block every lane of a road without signals
+        ahead of the ambulance (at least 300 m ahead), so the police
+        alert, the phone call and the police clearing it can be shown.
+        """
+
+        def act(context):
+            if context.phase != "driving" or context.police_watch is None:
+                raise ValueError(
+                    "An accident can only be simulated while the ambulance is driving."
+                )
+            place = context.police_watch.incident_road()
+            if place is None:
+                raise ValueError(
+                    "No road without signals far enough ahead of the ambulance."
+                )
+            road_id, stretch_name, in_time = place
+            incident = context.incidents.block_road(road_id)
+            if incident is None:
+                raise ValueError("Could not block that road.")
+            # Reported at once, like a real accident report: the police
+            # are alerted now, not once the queue behind it has built up.
+            context.police_watch.report_incident(road_id, context.now)
+            return {
+                **incident,
+                "road": route_planner.road_name(road_id) or stretch_name,
+                "police_in_time": in_time,
+            }
+
+        incident = self.run_in_simulation(act)
+        self.add_agent_message(
+            f"Accident reported on {incident['road']} (simulated): the road is "
+            "blocked ahead of the ambulance. Police are being alerted now."
+            + ("" if incident["police_in_time"] else
+               " It is close: the police may not clear it before the ambulance arrives."),
+            kind="warning",
+        )
+        return incident
 
     def add_agent_message(self, text, kind="note"):
         """Record a message from the AI agent for the dashboard."""
@@ -396,6 +480,14 @@ class SimulationService:
 
         # Deadlock watch: re-route or send police (corridor/response.py).
         response = None
+
+        # Police for the stretches without signals (corridor/police_watch.py).
+        police_watch = None
+
+        # What each police station is doing (corridor/police_board.py),
+        # and simulated accidents (the dashboard's button).
+        police_board = None
+        incidents = SumoIncidents()
         level_index = TRAFFIC_LEVELS.index(
             getattr(self, "_traffic_level", "normal")
         )
@@ -447,6 +539,8 @@ class SimulationService:
                 engine=engine,
                 route_cache=route_cache,
                 response=response,
+                police_watch=police_watch,
+                incidents=incidents,
             ))
 
             # Send the ambulance off once the roads have filled up.
@@ -504,9 +598,24 @@ class SimulationService:
                                 roads, level_index
                             )
                         ),
+                        busy_roads=lambda: (
+                            police_watch.active_roads() if police_watch else set()
+                        ),
                     )
                     response.set_route(
                         deadlock.route_info(ambulance.route(), traffic)
+                    )
+
+                    police_watch = SignallessWatch(
+                        ambulance, traffic, self.trip.get("stretches", []),
+                        notify=self._on_police_alert,
+                        responder=SumoResponder(),
+                        trip_id=f"trip{int(now)}",
+                        busy_roads=response.police_roads,
+                        road_name=route_planner.road_name,
+                    )
+                    police_board = PoliceBoard(
+                        route_planner.police_stations(), ambulance, SumoResponder()
                     )
 
                 snapshot = feed.ambulance_snapshot(ambulance)
@@ -544,6 +653,22 @@ class SimulationService:
                     response.set_route(
                         deadlock.route_info(ambulance.route(), traffic)
                     )
+                    # New route, new stretches without signals.
+                    police_watch.close(now)
+                    police_watch = SignallessWatch(
+                        ambulance, traffic,
+                        route_planner.route_police_plan(ambulance.route())[0],
+                        notify=self._on_police_alert,
+                        responder=SumoResponder(),
+                        trip_id=f"trip{int(now)}r",
+                        busy_roads=response.police_roads,
+                        road_name=route_planner.road_name,
+                    )
+
+                police_watch.step(now)
+                police_board.update(
+                    now, police_watch.alerts.values(), response.police
+                )
 
                 # Show the response's decisions in the dashboard feed.
                 for message in list(response.events)[events_shown:]:
@@ -556,6 +681,8 @@ class SimulationService:
                     engine.reset()
                     if response:
                         response.close()
+                    if police_watch:
+                        police_watch.close(now)
                     arrival_time = now
 
                 snapshot = {
@@ -584,6 +711,9 @@ class SimulationService:
                     else []
                 ),
                 response=response.summary() if response else None,
+                police_watch=self._police_summary(police_watch),
+                police_board=police_board.summary() if police_board else None,
+                incidents=incidents.summary(),
             )
 
             # One simulated second takes 1 / playback_speed real seconds.

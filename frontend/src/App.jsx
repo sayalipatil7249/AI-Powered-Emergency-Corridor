@@ -40,6 +40,7 @@ function App() {
   const [planError, setPlanError] = useState("");
   const [area, setArea] = useState(null);
   const [policeStations, setPoliceStations] = useState([]);
+  const [incidentBusy, setIncidentBusy] = useState(false);
 
   const simulationStatus = simulationState?.status;
   const running = ["starting", "warming_up", "running"].includes(
@@ -169,6 +170,26 @@ function App() {
     }
   };
 
+
+  // Demo: a crash blocks a road without signals ahead of the ambulance
+  // (backend: police alert, phone call, police clearing it).
+  const simulateIncident = async () => {
+    try {
+      setIncidentBusy(true);
+      setNotice("");
+      const response = await fetch(`${API_URL}/simulation/incident`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.detail || "Could not simulate an accident.");
+      }
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setIncidentBusy(false);
+    }
+  };
 
   // Watch the trip faster (the ambulance's simulated speed is unchanged).
   const changePlaybackSpeed = async (speed) => {
@@ -311,6 +332,21 @@ function App() {
           routeStatuses={shownStatuses}
           routeTraffic={showPlan ? [] : simulationState?.route_traffic || []}
           policeStations={policeStations}
+          routePolice={
+            (previewPlan
+              ? previewPlan.police_along_route
+              : liveTrip?.police_along_route) || []
+          }
+          stretches={
+            (previewPlan
+              ? previewPlan.signalless_stretches
+              : simulationState?.police_watch?.stretches) || []
+          }
+          policeWatch={showPlan ? null : simulationState?.police_watch}
+          policeBoard={showPlan ? null : simulationState?.police_board}
+          incidents={showPlan ? [] : simulationState?.incidents || []}
+          onSimulateIncident={running ? simulateIncident : null}
+          incidentBusy={incidentBusy}
           response={showPlan ? null : simulationState?.response}
           startPoint={tripPoints.start}
           hospitalPoint={tripPoints.hospital}

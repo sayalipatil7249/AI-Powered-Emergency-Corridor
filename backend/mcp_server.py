@@ -254,6 +254,28 @@ async def get_deadlock_watch() -> dict:
 
 
 @mcp.tool()
+async def get_police_alerts() -> dict:
+    """
+    Police for the stretches of the route without traffic signals: each
+    stretch (jammed / clear / passed), and every alert sent to a police
+    station because a stretch ahead jammed (station, road, ambulance and
+    police arrival times, status ALERTED / EN_ROUTE / ON_SCENE / PASSED /
+    CANCELLED, and the phone call's status).
+    """
+
+    def read(context):
+        _ensure_driving(context)
+        if context.police_watch is None:
+            return {"status": "not started"}
+        return simulation_service._police_summary(context.police_watch)
+
+    summary = await _live(read)
+    for stretch in summary.get("stretches", []):
+        stretch.pop("geometry", None)  # map lines: not useful to an agent
+    return summary
+
+
+@mcp.tool()
 async def get_corridor_events(limit: int = 15) -> dict:
     """
     The most recent corridor decisions, newest last: which signal became

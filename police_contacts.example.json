@@ -1,0 +1,14 @@
+{
+  "_note": "Copy to police_contacts.json, fill in TEST phones (yours, your team's - never real police numbers), then run: python -m scripts.set_police_phones . Numbers are saved in the database (police_stations.phone). On a Twilio trial account each phone must be verified in the Twilio console.",
+  "Balagandharva Police Station": "+91XXXXXXXXXX",
+  "Council Hall Police Station": "+91XXXXXXXXXX",
+  "Faraskhana Police Station": "+91XXXXXXXXXX",
+  "Ganesh Peth Police station": "+91XXXXXXXXXX",
+  "Kasba Peth Police Chowki": "+91XXXXXXXXXX",
+  "Mangaldas Police Chowki": "+91XXXXXXXXXX",
+  "Narayan Peth Police Chowki": "+91XXXXXXXXXX",
+  "Samarth Police Station": "+91XXXXXXXXXX",
+  "Shaniwar Peth Police Chowki": "+91XXXXXXXXXX",
+  "ShivajiNagar Police Station": "+91XXXXXXXXXX",
+  "Somwar Peth Police Station": "+91XXXXXXXXXX"
+}

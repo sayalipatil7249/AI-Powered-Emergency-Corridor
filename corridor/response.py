@@ -24,6 +24,8 @@ route-ahead features and road names are passed in.
 import logging
 from collections import deque
 
+from corridor.police_watch import worst_stopped_share
+
 logger = logging.getLogger(__name__)
 
 CHECK_EVERY = 5               # seconds between predictions
@@ -48,7 +50,7 @@ MIN_SPEED_FOR_TIMING = 4.0    # m/s, for "when does the ambulance get there"
 class DeadlockResponse:
     def __init__(self, ambulance, traffic, responder, stations,
                  route_ahead, predict, traffic_level, road_name=None,
-                 act=True, route_seconds=None):
+                 act=True, route_seconds=None, busy_roads=None):
         """
         stations: [{"name", "latitude", "longitude", "road"}]
         route_ahead(route_info) -> (features, jam)   (ai/deadlock.py)
@@ -58,7 +60,11 @@ class DeadlockResponse:
              (default: the responder's live travel times)
         act: False = decide but do nothing (the fair "without" case in
              ai/response_experiments.py: same checks, no action)
+        busy_roads() -> roads other police are already clearing
+             (corridor/police_watch.py), so two cars are not sent there
         """
+
+        self.busy_roads = busy_roads or (lambda: set())
 
         self.act = act
         self.route_seconds = route_seconds or responder.route_seconds
@@ -135,6 +141,13 @@ class DeadlockResponse:
             jam = {"start_index": index, "end_index": min(index + 1, len(route) - 1),
                    "distance": 0.0, "length": 0.0}
         jam_roads = route[jam["start_index"]:jam["end_index"] + 1]
+
+        if set(jam_roads) & self.busy_roads():
+            # Police are already on their way there (signal-less watch).
+            self.status = "watching"
+            self._cooldown_until = now + COOLDOWN_SECONDS
+            return None
+
         self.jam = self._describe_jam(jam, jam_roads)
 
         # Option 1: a new route around the jam.
@@ -221,6 +234,11 @@ class DeadlockResponse:
                     "longitude": station["longitude"],
                     "stage": "en_route",
                     "vehicles_waved": 0,
+                    "road": self.jam["name"],
+                    # The roads the officers will control, for the map.
+                    "zone": self._zone(jam_roads),
+                    "stopped_on_arrival": None,
+                    "stopped_after": None,
                 }
                 self._event(
                     f"Deadlock predicted on {self.jam['name']} "
@@ -262,6 +280,9 @@ class DeadlockResponse:
             police["stage"] = "clearing"
             police["arrived_at"] = now
             police["eta_seconds"] = 0
+            police["stopped_on_arrival"] = worst_stopped_share(
+                self.traffic, police["jam_roads"]
+            )
             self._event(
                 f"Police from {police['station']} arrived at "
                 f"{self.jam['name']} after {now - police['sent_at']:.0f} s "
@@ -277,6 +298,10 @@ class DeadlockResponse:
         if passed or now - police["arrived_at"] > MAX_CLEARING_SECONDS:
             self.responder.release_junctions()
             police["stage"] = "done"
+            police["stopped_after"] = worst_stopped_share(
+                self.traffic, police["jam_roads"]
+            )
+            police["on_scene_seconds"] = round(now - police["arrived_at"])
             self._event(
                 f"{'Ambulance through' if passed else 'Police stood down'}: "
                 f"{police['vehicles_waved']} vehicles waved through at "
@@ -290,11 +315,26 @@ class DeadlockResponse:
         self.status = "resolved"
         self._cooldown_until = now + COOLDOWN_SECONDS
 
+    def police_roads(self):
+        """Roads this response's police are heading to or clearing."""
+        if self.status in ("police_en_route", "police_clearing") and self.police:
+            return set(self.police["jam_roads"])
+        return set()
+
     def close(self):
         """Trip over: traffic back to normal, police car removed."""
         if self.police and self.police["stage"] != "done":
             self.responder.remove_unit(self.police["unit_id"])
             self.responder.release_junctions()
+
+    def _zone(self, roads):
+        """[[latitude, longitude], ...] along these roads."""
+        points = []
+        for road in roads:
+            for x, y in self.traffic.lane_shape(f"{road}_0"):
+                position = self.traffic.to_latlon(x, y)
+                points.append([position["latitude"], position["longitude"]])
+        return points
 
     def _describe_jam(self, jam, jam_roads):
         road = jam_roads[0]

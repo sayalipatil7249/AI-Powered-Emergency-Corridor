@@ -323,7 +323,8 @@ def plan_route(start_latitude, start_longitude, end_latitude, end_longitude,
 
     Returns {"roads", "geometry", "length_meters", "minutes_without_traffic",
     "signals", "streets", "depart_position", "arrival_position",
-    "hospital_name", "shorter_alternative"} or raises PlanningError.
+    "hospital_name", "shorter_alternative", "signalless_stretches",
+    "police_along_route"} or raises PlanningError.
     """
 
     for label, latitude, longitude in (
@@ -391,6 +392,11 @@ def plan_route(start_latitude, start_longitude, end_latitude, end_longitude,
                 "minutes_without_traffic": round(shortest_seconds / 60, 1),
             }
 
+    # Stretches without signals, and the police who can clear them.
+    stretches = signalless_stretches(edges)
+    result["police_along_route"] = police_cover(edges, stretches)
+    result["signalless_stretches"] = stretches
+
     return result
 
 
@@ -424,18 +430,31 @@ POLICE_FILE = os.path.join(SUMO_NETWORK_DIR, "police_stations.json")
 def police_stations():
     """Police stations inside the area (scripts/route_building/
     extract_police.py), each with the nearest road a vehicle can leave
-    from: [{"name", "latitude", "longitude", "road"}]."""
+    from: [{"name", "name_local", "kind", "latitude", "longitude", "road",
+    "road_name"}]. kind: "Police station" or "Police chowki" (a small post)."""
 
     if not os.path.exists(POLICE_FILE):
         return []
-    with open(POLICE_FILE) as file:
+    with open(POLICE_FILE, encoding="utf-8") as file:
         stations = json.load(file)
 
     result = []
     for station in stations:
         roads = _nearby_roads(station["latitude"], station["longitude"])
         if roads:
-            result.append({**station, "road": roads[0][0].getID()})
+            result.append({
+                **station,
+                "kind": (
+                    "Police chowki" if "chowki" in station["name"].lower()
+                    else "Police station"
+                ),
+                "road": roads[0][0].getID(),
+                # The nearest named street, for "on <street>".
+                "road_name": next(
+                    (edge.getName() for edge, _, _ in roads if edge.getName()),
+                    None,
+                ),
+            })
     return result
 
 
@@ -472,3 +491,146 @@ def estimate_route_seconds(roads, traffic_level):
     if minutes is None:
         return None
     return minutes[TRAFFIC_LEVELS[traffic_level]] * 60
+
+
+# ---------------------------------------------------------
+# Police cover for the signal-less stretches of a route
+# ---------------------------------------------------------
+#
+# The corridor engine clears queues at signals by turning them green.
+# Between signals (and at junctions without a signal) nothing can, so
+# the police there are told when that part of the route jams
+# (corridor/police_watch.py).
+
+# Stretches shorter than this are left out (a queue there belongs to
+# the junction before or after it).
+MIN_STRETCH_METERS = 100
+
+# Stations tried per stretch (nearest in a straight line first), and the
+# longest police drive worth asking for.
+POLICE_CANDIDATES = 3
+MAX_POLICE_DRIVE_SECONDS = 10 * 60
+
+
+def _signalled(node):
+    return node.getType().startswith("traffic_light")
+
+
+def signalless_stretches(edges):
+    """
+    Parts of a route where no signal controls the traffic: runs of roads
+    whose end is not a signal. [{"start_index", "end_index",
+    "length_meters", "name", "latitude", "longitude", "geometry"}] in
+    route order (indices into edges).
+    """
+
+    runs, run = [], []
+    for index, edge in enumerate(edges):
+        if _signalled(edge.getToNode()):
+            if run:
+                runs.append(run)
+            run = []
+        else:
+            run.append(index)
+    if run:
+        runs.append(run)
+
+    stretches = []
+    for run in runs:
+        run_edges = [edges[index] for index in run]
+        length = sum(edge.getLength() for edge in run_edges)
+        if length < MIN_STRETCH_METERS:
+            continue
+        middle = run_edges[len(run_edges) // 2].getShape()
+        x, y = middle[len(middle) // 2]
+        stretches.append({
+            "start_index": run[0],
+            "end_index": run[-1],
+            "length_meters": round(length),
+            "name": next(
+                (edge.getName() for edge in run_edges if edge.getName()),
+                "an unnamed road",
+            ),
+            **sumo_to_latlon(x, y),
+            "geometry": _route_geometry(run_edges),
+        })
+    return stretches
+
+
+@lru_cache(maxsize=4096)
+def _police_drive_seconds(from_road, to_road):
+    net = _net()
+    path, seconds = net.getOptimalPath(
+        net.getEdge(from_road), net.getEdge(to_road),
+        fastest=True, vClass=VEHICLE_CLASS,
+    )
+    return seconds if path else None
+
+
+def police_cover(edges, stretches):
+    """
+    Which stations can reach each stretch first, by road (a station
+    across the river can be close in a straight line but far by road).
+    Adds "number" and "stations" ([{"name", "road", "drive_seconds"}],
+    fastest first) to every stretch. Returns the first-choice stations
+    in route order: [{"name", "latitude", "longitude", "covers":
+    [{"stretch", "road", "drive_seconds"}]}].
+    """
+
+    net = _net()
+    stations = police_stations()
+    points = {
+        station["name"]: net.convertLonLat2XY(
+            station["longitude"], station["latitude"]
+        )
+        for station in stations
+    }
+
+    along_route = {}
+    for number, stretch in enumerate(stretches, 1):
+        stretch["number"] = number
+        target = edges[stretch["start_index"]]
+        start = target.getShape()[0]
+
+        nearest = sorted(
+            stations,
+            key=lambda station: math.dist(start, points[station["name"]]),
+        )[:POLICE_CANDIDATES]
+
+        options = []
+        for station in nearest:
+            seconds = _police_drive_seconds(station["road"], target.getID())
+            if seconds is not None and seconds <= MAX_POLICE_DRIVE_SECONDS:
+                options.append({
+                    "name": station["name"],
+                    "road": station["road"],
+                    "drive_seconds": round(seconds),
+                })
+        options.sort(key=lambda option: option["drive_seconds"])
+        stretch["stations"] = options
+
+        if options:
+            first = next(s for s in stations if s["name"] == options[0]["name"])
+            entry = along_route.setdefault(first["name"], {
+                "name": first["name"],
+                "latitude": first["latitude"],
+                "longitude": first["longitude"],
+                "covers": [],
+            })
+            entry["covers"].append({
+                "stretch": number,
+                "road": stretch["name"],
+                "drive_seconds": options[0]["drive_seconds"],
+            })
+
+    return list(along_route.values())
+
+
+def route_police_plan(road_ids):
+    """signalless_stretches + police_cover for a route given as road ids
+    (e.g. after a re-route): (stretches, police_along_route)."""
+
+    net = _net()
+    edges = [net.getEdge(road_id) for road_id in road_ids]
+    stretches = signalless_stretches(edges)
+    return stretches, police_cover(edges, stretches)

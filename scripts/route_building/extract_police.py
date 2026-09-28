@@ -25,6 +25,15 @@ def _english(name):
     return re.split(r"[^\x00-\x7F]", name)[0].strip()
 
 
+def _local(name, tags):
+    """The Marathi name: the name:mr tag, else the non-English part of
+    the name, or None."""
+    if tags.get("name:mr"):
+        return tags["name:mr"].strip()
+    match = re.search(r"[^\x00-\x7F].*", name)
+    return match.group(0).strip() if match else None
+
+
 def main():
     nodes = {}
     stations = []
@@ -37,7 +46,7 @@ def main():
                 position = (float(element.get("lat")), float(element.get("lon")))
                 nodes[element.get("id")] = position
                 if tags.get("amenity") == "police" and tags.get("name"):
-                    stations.append((tags["name"], position))
+                    stations.append((tags["name"], tags, position))
             elif element.tag == "way":
                 if tags.get("amenity") == "police" and tags.get("name"):
                     points = [
@@ -45,7 +54,7 @@ def main():
                         if node.get("ref") in nodes
                     ]
                     if points:
-                        stations.append((tags["name"], (
+                        stations.append((tags["name"], tags, (
                             sum(p[0] for p in points) / len(points),
                             sum(p[1] for p in points) / len(points),
                         )))
@@ -54,16 +63,17 @@ def main():
     result = [
         {
             "name": _english(name),
+            "name_local": _local(name, tags),
             "latitude": round(latitude, 6),
             "longitude": round(longitude, 6),
         }
-        for name, (latitude, longitude) in stations
+        for name, tags, (latitude, longitude) in stations
         if route_planner.inside_area(latitude, longitude)
     ]
     result.sort(key=lambda item: item["name"])
 
-    with open(OUTPUT, "w") as file:
-        json.dump(result, file, indent=2)
+    with open(OUTPUT, "w", encoding="utf-8") as file:
+        json.dump(result, file, indent=2, ensure_ascii=False)
     print(f"Saved {len(result)} police stations to {OUTPUT}")
 
 

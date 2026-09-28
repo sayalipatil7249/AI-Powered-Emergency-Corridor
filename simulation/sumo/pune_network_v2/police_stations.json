@@ -1,56 +1,67 @@
 [
   {
     "name": "Balagandharva Police Station",
+    "name_local": "बालगंधर्व पोलीस स्थानक",
     "latitude": 18.522236,
     "longitude": 73.847842
   },
   {
     "name": "Council Hall Police Station",
+    "name_local": null,
     "latitude": 18.524425,
     "longitude": 73.878856
   },
   {
     "name": "Faraskhana Police Station",
+    "name_local": "फरासखाना पोलीस ठाणे",
     "latitude": 18.516453,
     "longitude": 73.855879
   },
   {
     "name": "Ganesh Peth Police station",
+    "name_local": null,
     "latitude": 18.516175,
     "longitude": 73.862191
   },
   {
     "name": "Kasba Peth Police Chowki",
+    "name_local": "कसबा पेठ पोलीस चौकी",
     "latitude": 18.520476,
     "longitude": 73.856038
   },
   {
     "name": "Mangaldas Police Chowki",
+    "name_local": "मंगलदास पोलीस चौकी",
     "latitude": 18.533987,
     "longitude": 73.878905
   },
   {
     "name": "Narayan Peth Police Chowki",
+    "name_local": "नारायण पेठ पोलीस चौकी",
     "latitude": 18.5162,
     "longitude": 73.847865
   },
   {
     "name": "Samarth Police Station",
+    "name_local": "समर्थ पोलीस ठाणे",
     "latitude": 18.520318,
     "longitude": 73.869689
   },
   {
     "name": "Shaniwar Peth Police Chowki",
+    "name_local": "शनिवार पेठ पोलीस चौकी",
     "latitude": 18.520009,
     "longitude": 73.850024
   },
   {
     "name": "ShivajiNagar Police Station",
+    "name_local": null,
     "latitude": 18.529982,
     "longitude": 73.850013
   },
   {
     "name": "Somwar Peth Police Station",
+    "name_local": "सोमवार पेठ पोलिस स्टेशन",
     "latitude": 18.519526,
     "longitude": 73.862543
   }

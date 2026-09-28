@@ -183,6 +183,30 @@ function TripPlanner({
               road.
             </span>
           )}
+          {plan.police_along_route?.length > 0 && (
+            <div className="plan-police">
+              <span>
+                {plan.signalless_stretches.length} stretches have no signal
+                (dashed on the map). If one jams, these police stations get
+                a phone call:
+              </span>
+              <ul>
+                {plan.police_along_route.map((station) => (
+                  <li key={station.name}>
+                    <strong>{station.name}</strong>
+                    {station.phone ? ` · 📞 ${station.phone}` : " · no number saved"}
+                    {" · "}
+                    {station.covers
+                      .map(
+                        (cover) =>
+                          `${cover.road} (${Math.max(1, Math.round(cover.drive_seconds / 60))} min away)`
+                      )
+                      .join(", ")}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {plan.shorter_alternative && (
             <span>
               A shorter route exists (
