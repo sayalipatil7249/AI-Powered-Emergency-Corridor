@@ -1,0 +1,138 @@
+{
+  "hospital": {
+    "train_rows": 50166,
+    "test_rows": 18350,
+    "test_trips": 36,
+    "ai_model": {
+      "mae_seconds": 10.463653410816269,
+      "rmse_seconds": 22.415966485016014,
+      "mape_percent": 3.4369287627691514,
+      "median_abs_seconds": 3.644313197356972
+    },
+    "old_formula": {
+      "mae_seconds": 76.38724039334194,
+      "rmse_seconds": 93.31826211584571,
+      "mape_percent": 30.03213095496245,
+      "median_abs_seconds": 67.65958347895116
+    },
+    "average_speed_guess": {
+      "mae_seconds": 19.11721700964962,
+      "rmse_seconds": 27.016557658403027,
+      "mape_percent": 7.383716814564285,
+      "median_abs_seconds": 12.45467387614866
+    },
+    "at_departure": {
+      "ai_model": {
+        "mae_seconds": 18.094819892109406,
+        "rmse_seconds": 30.464170103229495,
+        "mape_percent": 3.366282390167514,
+        "median_abs_seconds": 11.563120100482479
+      },
+      "old_formula": {
+        "mae_seconds": 158.67718491867188,
+        "rmse_seconds": 165.9399334611271,
+        "mape_percent": 30.86106479668095,
+        "median_abs_seconds": 157.7437051889936
+      }
+    },
+    "top_features": [
+      {
+        "feature": "distance_left",
+        "mae_increase_seconds": 142.47965739738183
+      },
+      {
+        "feature": "speed",
+        "mae_increase_seconds": 15.158812049441167
+      },
+      {
+        "feature": "formula_eta",
+        "mae_increase_seconds": 5.3884229335401335
+      },
+      {
+        "feature": "second_signal_distance",
+        "mae_increase_seconds": 5.100797375352578
+      },
+      {
+        "feature": "route_progress",
+        "mae_increase_seconds": 2.3567489315616577
+      },
+      {
+        "feature": "acceleration",
+        "mae_increase_seconds": 2.2213541961245955
+      },
+      {
+        "feature": "next_signal_distance",
+        "mae_increase_seconds": 0.8818486968559854
+      },
+      {
+        "feature": "near_vehicles",
+        "mae_increase_seconds": 0.19062630470257189
+      }
+    ]
+  },
+  "next_signal": {
+    "train_rows": 39786,
+    "test_rows": 14484,
+    "test_trips": 36,
+    "ai_model": {
+      "mae_seconds": 5.095423979558063,
+      "rmse_seconds": 18.154275808506227,
+      "mape_percent": 10.156684860193081,
+      "median_abs_seconds": 0.9296172604907369
+    },
+    "old_formula": {
+      "mae_seconds": 19.105743700257044,
+      "rmse_seconds": 25.832052990964616,
+      "mape_percent": 35.56009269924137,
+      "median_abs_seconds": 14.0713196285387
+    },
+    "at_departure": {
+      "ai_model": {
+        "mae_seconds": 1.9806077710143137,
+        "rmse_seconds": 5.4419663215520755,
+        "mape_percent": NaN,
+        "median_abs_seconds": 0.4492759888393272
+      },
+      "old_formula": {
+        "mae_seconds": 1.64680937858816,
+        "rmse_seconds": 2.9618789907065293,
+        "mape_percent": NaN,
+        "median_abs_seconds": 0.9457196927529781
+      }
+    },
+    "top_features": [
+      {
+        "feature": "next_signal_distance",
+        "mae_increase_seconds": 26.117176997866675
+      },
+      {
+        "feature": "formula_next_signal_eta",
+        "mae_increase_seconds": 13.802696199658682
+      },
+      {
+        "feature": "speed",
+        "mae_increase_seconds": 3.125332688247944
+      },
+      {
+        "feature": "route_progress",
+        "mae_increase_seconds": 1.3189148620993238
+      },
+      {
+        "feature": "distance_left",
+        "mae_increase_seconds": 0.8857590794949252
+      },
+      {
+        "feature": "signals_left",
+        "mae_increase_seconds": 0.6928405752786233
+      },
+      {
+        "feature": "acceleration",
+        "mae_increase_seconds": 0.33174304483311595
+      },
+      {
+        "feature": "second_signal_distance",
+        "mae_increase_seconds": 0.18467486836574754
+      }
+    ]
+  }
+}

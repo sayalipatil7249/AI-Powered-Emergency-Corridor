@@ -1,0 +1,26 @@
+{
+  "trips": {
+    "train": 236,
+    "test": 60
+  },
+  "model": "linear",
+  "cross_validation_error_seconds": {
+    "gradient boosting": 167.3,
+    "linear": 162.5
+  },
+  "average_error_minutes": {
+    "ai_model": 2.29,
+    "formula_x_average_factor": 2.38,
+    "empty_road_formula": 2.67
+  },
+  "average_trip_minutes_by_level": {
+    "heavy": 9.5,
+    "light": 7.3,
+    "normal": 8.4
+  },
+  "slow_down_vs_empty_road": {
+    "heavy": 2.12,
+    "light": 1.65,
+    "normal": 1.91
+  }
+}

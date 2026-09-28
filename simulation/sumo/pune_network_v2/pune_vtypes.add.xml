@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Pune driving profile for background traffic.
+
+    Trips without a type use DEFAULT_VEHTYPE, so redefining it here
+    (loaded before the route files) changes every background car.
+
+    speedFactor: drivers' desired speed as a fraction of the speed limit.
+        Mixed traffic (two-wheelers, auto-rickshaws, pedestrians, roadside
+        activity) keeps real Pune speeds well below the posted limit.
+        Mean 0.55 (about 27 km/h on a 50 km/h road); even the fastest
+        drivers stay at 0.75 (37.5 km/h), below the ambulance with its
+        siren (ambulance_vtype.add.xml).
+    sigma: driver imperfection (0 = perfect, 1 = very erratic).
+    minGap / tau: shorter gaps and reaction times than SUMO's European
+        defaults, as seen in Indian city traffic.
+-->
+<additional>
+    <vType
+        id="DEFAULT_VEHTYPE"
+        vClass="passenger"
+        speedFactor="normc(0.55,0.1,0.3,0.75)"
+        sigma="0.6"
+        minGap="1.5"
+        tau="0.9"
+    />
+</additional>

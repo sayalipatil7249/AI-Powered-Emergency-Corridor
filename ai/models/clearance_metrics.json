@@ -1,0 +1,46 @@
+{
+  "junction_switches": {
+    "train": 18459,
+    "test": 6719
+  },
+  "test_seeds": [
+    12,
+    13,
+    14,
+    15
+  ],
+  "quantile": 0.85,
+  "clearance_error_seconds": {
+    "ai_model": 3.0,
+    "rule": 7.6
+  },
+  "all_junctions": {
+    "ai_model": {
+      "ready_in_time_percent": 97.4,
+      "average_seconds_late_when_late": 12.2,
+      "average_extra_red_seconds": 8.0,
+      "average_lead_seconds": 17.2
+    },
+    "rule": {
+      "ready_in_time_percent": 86.4,
+      "average_seconds_late_when_late": 28.1,
+      "average_extra_red_seconds": 8.2,
+      "average_lead_seconds": 13.0
+    }
+  },
+  "junctions_with_a_queue": {
+    "count": 1931,
+    "ai_model": {
+      "ready_in_time_percent": 96.0,
+      "average_seconds_late_when_late": 19.0,
+      "average_extra_red_seconds": 9.8,
+      "average_lead_seconds": 23.6
+    },
+    "rule": {
+      "ready_in_time_percent": 83.3,
+      "average_seconds_late_when_late": 32.8,
+      "average_extra_red_seconds": 7.3,
+      "average_lead_seconds": 15.5
+    }
+  }
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<routes>
+
+    <vType
+        id="normal_car"
+        accel="2.6"
+        decel="4.5"
+        sigma="0.5"
+        length="5"
+        maxSpeed="13.9"
+    />
+
+    <vType
+        id="ambulance"
+        accel="3.0"
+        decel="5.0"
+        sigma="0.2"
+        length="5"
+        maxSpeed="20"
+        vClass="emergency"
+    />
+
+    <route
+        id="emergency_route"
+        edges="282484394#3 159889519#0 159889519#1 159889519#2 159889519#3 159889519#4 -1117999821 -1161989187#0 -53745381#1 -53745381#0 -53759273#1 -53759273#0 1162442951#1 151723528#0 151723528#1 1146882482 1385293493#1 53759316 1483831584#1 211082517#0 246580191#10 1521255189 817900770#0 817900770#1 817900770#2 817900770#3 817900770#3-AddedOffRampEdge 817900784#0 -1303466524 215804410#0 215804410#1 -68573854#1 1160332074#1"
+    />
+
+    <vehicle
+        id="ambulance_01"
+        type="ambulance"
+        route="emergency_route"
+        depart="0"
+    />
+
+</routes>

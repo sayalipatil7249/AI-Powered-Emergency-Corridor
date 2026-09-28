@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Ambulance vehicle type for the live demo. The ambulance itself is
+    added at run time on the planned route (SumoAmbulanceTracker.dispatch).
+    Realistic for Pune: top speed 45 km/h (clear stretches only), a heavy
+    vehicle's slower acceleration and braking, and uneven driving while
+    weaving through traffic (sigma). speedFactor ~0.8 of the limit (about
+    40 km/h, 35-45 km/h) stands for roadside friction - two-wheelers,
+    autos, pedestrians, parked vehicles - that SUMO's lane model does not
+    show. With the siren it is still faster than every normal car
+    (~0.55, at most 0.75: pune_vtypes.add.xml).
+-->
+<additional>
+    <vType
+        id="ambulance"
+        accel="2.0"
+        decel="4.5"
+        sigma="0.35"
+        length="6.0"
+        maxSpeed="12.5"
+        speedFactor="normc(0.8,0.05,0.7,0.9)"
+        vClass="emergency"
+    >
+        <!-- Follow the dispatched route; don't let SUMO's re-routing
+             device (meant for normal drivers) change it. -->
+        <param key="has.rerouting.device" value="false"/>
+        <!-- Siren on: nearby cars pull aside and form a rescue lane
+             (SUMO's bluelight device), as drivers do for a real ambulance. -->
+        <param key="has.bluelight.device" value="true"/>
+    </vType>
+
+    <!-- Traffic police vehicle sent to clear a jam for the ambulance
+         (corridor/response.py): siren on, like the ambulance. -->
+    <vType
+        id="police"
+        accel="2.5"
+        decel="4.5"
+        sigma="0.3"
+        length="4.5"
+        maxSpeed="13.9"
+        speedFactor="normc(0.85,0.05,0.75,0.95)"
+        vClass="emergency"
+        color="0,70,200"
+    >
+        <param key="has.rerouting.device" value="false"/>
+        <param key="has.bluelight.device" value="true"/>
+    </vType>
+</additional>

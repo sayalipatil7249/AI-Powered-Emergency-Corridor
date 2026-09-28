@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<routes>
+    <vType
+        id="ambulance"
+        length="5.00"
+        maxSpeed="20.00"
+        vClass="emergency"
+        accel="3.0"
+        decel="5.0"
+        sigma="0.2"
+    />
+
+    <route
+        id="emergency_route"
+        edges="
+            282484394#3
+            159889519#0
+            159889519#1
+            159889519#2
+            159889519#3
+            159889519#4
+            159889519#5
+            53090145#0
+            53090145#1
+            53090145#3
+            282484395#1
+            282484395#2
+            282484395#3
+            22841095
+            1088755908#0
+            1088755908#1
+            1088755908#2
+            151724010#1
+            151724010#2
+            218681353#0
+            218681353#2
+        "
+    />
+
+    <vehicle
+        id="ambulance_01"
+        type="ambulance"
+        route="emergency_route"
+        depart="0"
+    />
+</routes>

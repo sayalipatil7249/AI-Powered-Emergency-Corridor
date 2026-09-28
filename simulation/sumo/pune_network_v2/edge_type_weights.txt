@@ -1,0 +1,11 @@
+highway.trunk 10
+highway.trunk_link 4
+highway.primary 8
+highway.primary_link 4
+highway.secondary 5
+highway.secondary_link 3
+highway.tertiary 2
+highway.residential 0.3
+highway.unclassified 0.5
+highway.living_street 0.1
+highway.service 0.1

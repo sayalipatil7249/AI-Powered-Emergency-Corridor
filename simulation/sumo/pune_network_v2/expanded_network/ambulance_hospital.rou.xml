@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <vType
+        id="ambulance"
+        accel="2.0"
+        decel="4.5"
+        sigma="0.35"
+        length="6.0"
+        maxSpeed="12.5"
+        speedFactor="normc(0.8,0.05,0.7,0.9)"
+        vClass="emergency"
+    >
+        <!-- Follow the dispatched route; don't let SUMO's re-routing
+             device (meant for normal drivers) change it. -->
+        <param key="has.rerouting.device" value="false"/>
+        <!-- Siren on: nearby cars pull aside and form a rescue lane
+             (SUMO's bluelight device), as drivers do for a real ambulance. -->
+        <param key="has.bluelight.device" value="true"/>
+    </vType>
+
+    <route
+        id="emergency_corridor_to_hospital"
+        edges="282484394#3 216582074#0 216582074#1 216582074#2 216582074#3 216582074#4 216582074#5 216582074#6 232745956#1 53760087#0 53760087#1 53760087#2 53760087#3 22841096#7 22841268#1 22841268#2 22841268#3 282484394#0 282484394#2 282484394#3 159889519#0 159889519#1 159889519#2 159889519#3 159889519#4 159889519#5 53090145#0 53090145#1 53090145#3 282484395#1 282484395#2 282484395#3 22841095 1088755908#0 1088755908#1 1088755908#2 151724010#1 151724010#2 218681353#0 218681353#2 218681353#3 218681353#4 1146886465 750618841#2 1146886464-AddedOnRampEdge 1146886464 1322511519 652398183#1 311631282#1 311631282#2 311631282#4 311631282#5 311631282#6 311631282#7 311631282#8 311631282#9 311631282#10 311631282#11 311631282#12 311631282#13 311631282#14 311631282#15 311631282#16 311631282#17 311631282#18 311631282#19 652398188#1 652398188#2 652398188#3 206994680#0 206994680#1 206994680#2 -206994680#2 -206994680#1"
+    />
+
+    <vehicle
+        id="ambulance_01"
+        type="ambulance"
+        route="emergency_corridor_to_hospital"
+        depart="0"
+    />
+</routes>

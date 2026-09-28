@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <vType
+        id="ambulance_test"
+        accel="3.0"
+        decel="5.0"
+        sigma="0.2"
+        length="5.0"
+        maxSpeed="20.0"
+        vClass="emergency"
+    />
+
+    <trip
+        id="ambulance_test"
+        type="ambulance_test"
+        depart="0"
+        from="-206994680#1"
+        to="206994679#2"
+    />
+</routes>
