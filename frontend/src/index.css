@@ -286,8 +286,7 @@ p {
 .map-legend {
   left: 14px;
   bottom: 14px;
-  /* Stay clear of the right-side column (.map-side). */
-  max-width: calc(100% - 358px);
+  max-width: calc(100% - 28px);
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -518,11 +517,44 @@ p {
 
 /* ================= Side panel ================= */
 
+/* Top to bottom: plan a trip, live status, route, trip metrics. The
+   panel scrolls as one column; the metrics stay pinned to its bottom. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.trip-metrics {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: auto;
+  background: var(--bg);
+  /* Hide what scrolls underneath in the gap above the metrics. */
+  box-shadow: 0 -12px 0 var(--bg);
+}
+
+/* Live traffic, AI deadlock watch, police and AI agent cards */
+.live-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-status .section-heading {
+  margin-bottom: 0;
+}
+
+.live-status-empty {
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .panel-section {
@@ -620,10 +652,7 @@ p {
 /* Route timeline */
 
 .timeline-section {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  flex: none;
 }
 
 .section-heading {
@@ -638,9 +667,6 @@ p {
 }
 
 .timeline {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   margin: 0;
   padding: 0 4px 0 0;
   list-style: none;
@@ -797,18 +823,24 @@ p {
     right: 14px;
     top: 60px;
   }
+
+  .panel {
+    overflow: visible;
+  }
+
+  .trip-metrics {
+    position: static;
+    box-shadow: none;
+  }
 }
 
-/* ================= AI agent feed (on the map) ================= */
-
+/* ================= AI agent feed (side panel) ================= */
 
 .agent-feed {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(17, 24, 39, 0.92);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  background: var(--surface-raised);
 }
 
 .agent-feed-heading {
@@ -1023,13 +1055,10 @@ p {
 
 /* ================= Live traffic card (on the map) ================= */
 
-/* Top-right column: view switch, follow toggle, live traffic */
-/* Right side of the map, top to bottom: controls, cards (scrolling when
-   there are many), AI agent feed - one column, so nothing overlaps. */
+/* Top right of the map: view switch and follow toggle */
 .map-side {
   top: 14px;
   right: 14px;
-  bottom: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1048,25 +1077,6 @@ p {
   justify-content: flex-end;
   gap: 8px;
   flex: none;
-}
-
-.map-side-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 0 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.map-side-cards > * {
-  flex: none;
-}
-
-.map-side .agent-feed {
-  flex: none;
-  margin-top: auto;
 }
 
 .view-toggle {
@@ -1121,8 +1131,7 @@ p {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(17, 24, 39, 0.9);
-  backdrop-filter: blur(8px);
+  background: var(--surface-raised);
   font-size: 12.5px;
   line-height: 1.45;
 }
@@ -1499,7 +1508,7 @@ p {
 
 .incident-button:disabled {
   border-color: var(--border);
-  background: rgba(17, 24, 39, 0.9);
+  background: var(--surface-raised);
   color: var(--muted);
   cursor: not-allowed;
 }
@@ -1519,4 +1528,11 @@ p {
 .police-road {
   color: var(--text);
   font-size: 12px;
+}
+
+/* Links styled as buttons (header navigation) */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }

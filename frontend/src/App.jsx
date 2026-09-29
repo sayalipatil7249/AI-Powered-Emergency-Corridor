@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import MapView from "./MapView";
 import DashboardHeader from "./components/DashboardHeader";
+import LiveStatusPanel from "./components/LiveStatusPanel";
 import StoryBar from "./components/StoryBar";
 import TripPanel from "./components/TripPanel";
 import TripPlanner from "./components/TripPlanner";
@@ -345,8 +346,6 @@ function App() {
           policeWatch={showPlan ? null : simulationState?.police_watch}
           policeBoard={showPlan ? null : simulationState?.police_board}
           incidents={showPlan ? [] : simulationState?.incidents || []}
-          onSimulateIncident={running ? simulateIncident : null}
-          incidentBusy={incidentBusy}
           response={showPlan ? null : simulationState?.response}
           startPoint={tripPoints.start}
           hospitalPoint={tripPoints.hospital}
@@ -362,7 +361,6 @@ function App() {
             })
           }
           overlay={<StoryBar story={story} notice={notice} />}
-          agentFeed={simulationState?.agent_feed || []}
         />
 
         <TripPanel
@@ -372,6 +370,19 @@ function App() {
             simulationState?.vehicle_count ?? vehicles.length
           }
           hospitalName={hospitalName}
+          live={
+            <LiveStatusPanel
+              ambulance={shownAmbulance}
+              liveTraffic={simulationState?.live_traffic}
+              response={showPlan ? null : simulationState?.response}
+              policeWatch={showPlan ? null : simulationState?.police_watch}
+              policeBoard={showPlan ? null : simulationState?.police_board}
+              policeStations={policeStations}
+              agentFeed={simulationState?.agent_feed || []}
+              onSimulateIncident={running ? simulateIncident : null}
+              incidentBusy={incidentBusy}
+            />
+          }
           planner={
             <TripPlanner
               key={tripStart?.name || "no-start"}

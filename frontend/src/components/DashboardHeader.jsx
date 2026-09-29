@@ -68,6 +68,10 @@ function DashboardHeader({
         >
           {stopping ? "Stopping…" : "Stop"}
         </button>
+
+        <a className="button button-secondary" href="#/admin">
+          Admin
+        </a>
       </div>
     </header>
   );

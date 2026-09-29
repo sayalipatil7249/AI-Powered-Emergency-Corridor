@@ -221,7 +221,22 @@ def _mask(phone):
     return phone[:5] + "X" * max(0, len(phone) - 7) + phone[-2:] if phone else None
 
 
+# Twilio errors worth explaining in plain words (twilio.com/docs/errors).
+TWILIO_ERRORS = {
+    21219: "Number not verified in Twilio: a trial account can only call "
+           "numbers verified in the Twilio console (Verified Caller IDs).",
+    21215: "Calls to this country are not enabled in Twilio's Voice "
+           "geographic permissions.",
+    21211: "Not a valid phone number.",
+}
+
+
 def _short(error):
+    """A readable reason, e.g. "Twilio 21219: Number not verified ..."."""
+    code = getattr(error, "code", None)
+    if code is not None:
+        reason = TWILIO_ERRORS.get(code) or getattr(error, "msg", "") or ""
+        return f"Twilio {code}: {reason}".strip()[:200]
     return str(error).strip().splitlines()[-1][:200]
 
 

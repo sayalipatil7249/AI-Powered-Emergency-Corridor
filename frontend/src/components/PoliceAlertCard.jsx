@@ -38,9 +38,13 @@ function callText(call) {
   if (!call) return null;
   const label = CALL_LABELS[call.status] || call.status;
   const source = SOURCE_LABELS[call.source];
-  return call.to
+  const text = call.to
     ? `📞 ${call.to}${source ? ` (${source})` : ""} · ${label}`
     : `📞 ${label}`;
+  // Why a call failed (e.g. a number not verified in Twilio).
+  return call.status === "failed" && call.detail
+    ? `${text} · ${call.detail}`
+    : text;
 }
 
 // One card for the police: alerts for the stretches of the route

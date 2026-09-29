@@ -11,6 +11,10 @@ from backend.models.emergency import Emergency
 from backend.models.traffic_signal import TrafficSignal
 from backend.models.police_station import PoliceStation
 from backend.models.police_call import PoliceCall
+from backend.models.ambulance_request import AmbulanceRequest
+from backend.models.route_optimization_log import RouteOptimizationLog
+from backend.models.grievance import Grievance
+from backend.models.trip_event import TripEvent
 
 from backend.api.routes.general import router as general_router
 from backend.api.routes.ambulance import router as ambulance_router
@@ -22,10 +26,12 @@ from backend.api.routes.traffic_signal import router as traffic_signal_router
 from backend.api.routes.simulation import router as simulation_router
 from backend.api.routes.planning import router as planning_router
 from backend.api.routes.police import router as police_router
+from backend.api.routes.admin import router as admin_router
 from backend.mcp_server import mcp
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.services import admin_service
 from backend.services.police_station_service import ensure_schema, sync_stations
 from simulation.sumo import route_planner
 
@@ -73,6 +79,12 @@ try:
 except Exception as error:
     logging.getLogger(__name__).warning("Could not sync police stations: %s", error)
 
+# Admin dashboard: add the trip map columns to an older requests table.
+try:
+    admin_service.ensure_schema()
+except Exception as error:
+    logging.getLogger(__name__).warning("Could not update the admin tables: %s", error)
+
 
 # Register application routes.
 app.include_router(general_router) #says hello, and /db-check checks the database is awake.
@@ -85,6 +97,7 @@ app.include_router(traffic_signal_router) #add or look up a light, or change its
 app.include_router(simulation_router) #start or stop the pretend city, get its state, and the /ws walkie-talkie that sends live updates.
 app.include_router(planning_router) #find places, list hospitals and plan the fastest ambulance route.
 app.include_router(police_router) #police stations, their contact numbers, and the log of police calls.
+app.include_router(admin_router) #admin dashboard: request KPIs, delay reasons, route performance and grievance tickets.
 
 # MCP server for AI agents at /mcp. Mounted last so it never hides the routes above.
 app.mount("/", mcp_app)

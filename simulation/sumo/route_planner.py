@@ -264,6 +264,48 @@ def signal_name(signal_id, along_road_id=None):
     return None
 
 
+@lru_cache(maxsize=4096)
+def junction_info(road_id):
+    """
+    The junction a vehicle on this road is heading into (or is inside,
+    for a ":<junction>_<n>" road): {"id", "name", "signal", "latitude",
+    "longitude"}, or None. name: "A Road × B Road", "A Road junction",
+    or None when no street there has a name.
+    """
+
+    net = _net()
+    try:
+        if road_id.startswith(":"):
+            node = net.getNode(road_id[1:].rsplit("_", 1)[0])
+        else:
+            node = net.getEdge(road_id).getToNode()
+    except KeyError:
+        return None
+
+    distinct = []
+    for edge in node.getIncoming() + node.getOutgoing():
+        name = edge.getName()
+        if not name or name.lower() in _GENERIC_NAMES:
+            continue
+        if _name_key(name) not in {_name_key(item) for item in distinct}:
+            distinct.append(name)
+
+    if len(distinct) >= 2:
+        name = f"{distinct[0]} × {distinct[1]}"
+    elif distinct:
+        name = f"{distinct[0]} junction"
+    else:
+        name = None
+
+    x, y = node.getCoord()
+    return {
+        "id": node.getID(),
+        "name": name,
+        "signal": "traffic_light" in node.getType(),
+        **sumo_to_latlon(x, y),
+    }
+
+
 def _route_signals(edges):
     """Signals the route passes through, in order, with positions."""
 

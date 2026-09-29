@@ -382,6 +382,10 @@ class SumoSignalController:
 _NORMAL_SPEED_MODE = 31
 _WAVED_THROUGH_SPEED_MODE = 7
 
+# Travel time given to roads a re-route must avoid (s): effectively
+# closed for that one vehicle.
+_AVOID_SECONDS = 100000
+
 # Police holding traffic back: incoming lanes limited to this (m/s).
 _HELD_LANE_SPEED = 0.1
 
@@ -428,6 +432,41 @@ class SumoResponder:
             return True
         except traci.TraCIException:
             return False
+
+    def route_around(self, vehicle_id, avoid_roads):
+        """Fastest route for the vehicle from the road it is on to its
+        destination with current travel times, staying off avoid_roads:
+        its road ids, or None. The vehicle keeps its route until
+        reroute_ambulance() is called."""
+        try:
+            route = list(traci.vehicle.getRoute(vehicle_id))
+            index = traci.vehicle.getRouteIndex(vehicle_id)
+            if traci.vehicle.getRoadID(vehicle_id) != route[index]:
+                return None  # inside a junction: ask again on the next road
+        except traci.TraCIException:
+            return None
+
+        remaining = route[index:]
+        # Only this vehicle sees the avoided roads as (nearly) closed.
+        for road in avoid_roads:
+            traci.vehicle.setAdaptedTraveltime(vehicle_id, road, _AVOID_SECONDS)
+        try:
+            traci.vehicle.rerouteTraveltime(vehicle_id, True)
+            new_route = list(traci.vehicle.getRoute(vehicle_id))
+            new_route = new_route[traci.vehicle.getRouteIndex(vehicle_id):]
+        except traci.TraCIException:
+            new_route = None
+        finally:
+            try:
+                traci.vehicle.setRoute(vehicle_id, remaining)
+            except traci.TraCIException:
+                pass
+            for road in avoid_roads:
+                traci.vehicle.setAdaptedTraveltime(vehicle_id, road)
+
+        if not new_route or new_route == remaining or set(new_route) & set(avoid_roads):
+            return None
+        return new_route
 
     def send_unit(self, unit_id, roads):
         try:
@@ -621,6 +660,14 @@ class SumoIncidents:
             "cleared_by": None,
         }
         return self._public(_INCIDENTS[incident_id])
+
+    def active_roads(self):
+        """Roads still blocked by an accident (not yet cleared)."""
+        return {
+            incident["road_id"]
+            for incident in _INCIDENTS.values()
+            if incident["cleared_at"] is None
+        }
 
     def summary(self):
         """Every incident of this run; notices crashes that ended by

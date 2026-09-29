@@ -1,0 +1,338 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  CircleMarker,
+  MapContainer,
+  Polyline,
+  TileLayer,
+  Tooltip,
+  useMap,
+} from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+
+import SvgIcon from "../components/SvgIcon";
+import { HOSPITAL_ICON } from "../icons";
+import { formatDistance, formatDuration } from "../routeStatus";
+import { adminApi, formatDateTime, label } from "./adminApi";
+import "./admin.css";
+
+// What each event kind looks like. Colours carry identity only; the
+// legend, tooltips and timeline always name the kind as well.
+const KINDS = {
+  DISPATCH: { label: "Dispatch", color: "#8b95a7" },
+  STOP: { label: "Stood still", color: "#d03b3b" },
+  SIGNAL: { label: "Signal green", color: "#0ca30c" },
+  POLICE: { label: "Police", color: "#9085e9" },
+  ACCIDENT: { label: "Accident", color: "#c98500" },
+  REROUTE: { label: "Re-route", color: "#d95926" },
+  AI: { label: "AI watch", color: "#8b95a7" },
+  ARRIVAL: { label: "Arrival", color: "#0ca30c" },
+  END: { label: "Ended", color: "#8b95a7" },
+};
+
+const TRACK_COLOR = "#3987e5";
+const PLANNED_COLOR = "#8b95a7";
+const REROUTE_COLOR = "#d95926";
+
+function since(seconds) {
+  return `+${formatDuration(seconds)}`;
+}
+
+// Fit the map to the trip once, then fly to the clicked event.
+function MapFocus({ bounds, focus }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds.length > 1) map.fitBounds(bounds, { padding: [30, 30] });
+  }, [map, bounds]);
+  useEffect(() => {
+    if (focus) map.flyTo(focus, Math.max(map.getZoom(), 17), { duration: 0.6 });
+  }, [map, focus]);
+  return null;
+}
+
+function TripMap({ trip, focus }) {
+  const planned = trip.route_geometry;
+  const track = trip.track.map((point) => [point[0], point[1]]);
+  const reroutes = trip.events.filter(
+    (event) => event.kind === "REROUTE" && event.data?.route?.length > 1
+  );
+  const markers = trip.events.filter(
+    (event) =>
+      event.latitude != null &&
+      ["STOP", "SIGNAL", "POLICE", "ACCIDENT"].includes(event.kind)
+  );
+  const bounds = useMemo(
+    () => (track.length > 1 ? track : planned),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trip.request_id]
+  );
+
+  if (planned.length < 2 && track.length < 2) {
+    return <p className="admin-empty">No map data for this trip.</p>;
+  }
+
+  const start = track[0] || planned[0];
+  const end = track[track.length - 1] || planned[planned.length - 1];
+
+  return (
+    <div className="trip-map">
+      <MapContainer
+        center={start}
+        zoom={15}
+        className="map"
+        zoomControl
+        preferCanvas
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={19}
+        />
+        <MapFocus bounds={bounds} focus={focus} />
+
+        {planned.length > 1 && (
+          <Polyline
+            positions={planned}
+            pathOptions={{ color: PLANNED_COLOR, weight: 3, opacity: 0.7, dashArray: "6 8" }}
+          >
+            <Tooltip sticky>Planned route</Tooltip>
+          </Polyline>
+        )}
+        {reroutes.map((event, index) => (
+          <Polyline
+            key={`reroute-${index}`}
+            positions={event.data.route}
+            pathOptions={{ color: REROUTE_COLOR, weight: 3, opacity: 0.8, dashArray: "2 6" }}
+          >
+            <Tooltip sticky>New route after re-route at {since(event.seconds)}</Tooltip>
+          </Polyline>
+        ))}
+        {track.length > 1 && (
+          <Polyline positions={track} pathOptions={{ color: TRACK_COLOR, weight: 4, opacity: 0.95 }}>
+            <Tooltip sticky>Path driven</Tooltip>
+          </Polyline>
+        )}
+
+        {markers.map((event, index) => {
+          const kind = KINDS[event.kind];
+          const radius =
+            event.kind === "STOP"
+              ? Math.min(16, 6 + (event.duration_seconds || 0) / 20)
+              : 6;
+          return (
+            <CircleMarker
+              key={`marker-${index}`}
+              center={[event.latitude, event.longitude]}
+              radius={radius}
+              pathOptions={{
+                color: "#0b1120",
+                weight: 2,
+                fillColor: kind.color,
+                fillOpacity: 0.9,
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -6]}>
+                {kind.label} · {since(event.seconds)}
+                <br />
+                {event.title}
+                {event.junction_name && event.kind === "STOP" && (
+                  <>
+                    <br />
+                    {event.junction_name}
+                  </>
+                )}
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
+
+        {start && (
+          <CircleMarker center={start} radius={7} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#8b95a7", fillOpacity: 1 }}>
+            <Tooltip direction="top" offset={[0, -6]}>Start: {trip.start_name}</Tooltip>
+          </CircleMarker>
+        )}
+        {end && trip.status === "COMPLETED" && (
+          <CircleMarker center={end} radius={8} pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 }}>
+            <Tooltip direction="top" offset={[0, -6]}>Hospital: {trip.hospital_name}</Tooltip>
+          </CircleMarker>
+        )}
+      </MapContainer>
+
+      <ul className="trip-legend" aria-label="Map legend">
+        <li><span className="trip-line" style={{ background: TRACK_COLOR }} />Path driven</li>
+        <li><span className="trip-line dashed" style={{ color: PLANNED_COLOR }} />Planned route</li>
+        {reroutes.length > 0 && (
+          <li><span className="trip-line dashed" style={{ color: REROUTE_COLOR }} />New route</li>
+        )}
+        {["STOP", "SIGNAL", "POLICE", "ACCIDENT"].map((kind) => (
+          <li key={kind}>
+            <span className="admin-swatch round" style={{ background: KINDS[kind].color }} />
+            {KINDS[kind].label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Fact({ label: title, value, sub }) {
+  return (
+    <div className="admin-tile">
+      <span className="admin-tile-label">{title}</span>
+      <strong className="admin-tile-value small">{value}</strong>
+      {sub && <span className="admin-tile-sub">{sub}</span>}
+    </div>
+  );
+}
+
+// One trip: summary, map and everything that happened, in time order.
+// Opened at #/admin/trip/<request id>.
+function TripDetail({ requestId }) {
+  const [trip, setTrip] = useState(null);
+  const [error, setError] = useState("");
+  const [focus, setFocus] = useState(null);
+  const [kindFilter, setKindFilter] = useState("");
+
+  useEffect(() => {
+    let current = true;
+    adminApi
+      .trip(requestId)
+      .then((result) => current && setTrip(result))
+      .catch((problem) => current && setError(problem.message));
+    return () => {
+      current = false;
+    };
+  }, [requestId]);
+
+  const events = (trip?.events || []).filter(
+    (event) => !kindFilter || event.kind === kindFilter
+  );
+  const kinds = [...new Set((trip?.events || []).map((event) => event.kind))];
+  const stopsTotal = (trip?.events || [])
+    .filter((event) => event.kind === "STOP")
+    .reduce((sum, event) => sum + (event.duration_seconds || 0), 0);
+
+  return (
+    <div className="admin-page">
+      <header className="header">
+        <div className="brand">
+          <SvgIcon svg={HOSPITAL_ICON} className="brand-mark" />
+          <div>
+            <h1>{requestId}</h1>
+            <p>
+              {trip
+                ? `${trip.start_name || "--"} to ${trip.hospital_name || "--"} · ${formatDateTime(trip.dispatched_at)}`
+                : "Trip details"}
+            </p>
+          </div>
+        </div>
+        <div className="header-actions">
+          <a className="button button-secondary" href="#/admin">
+            Admin dashboard
+          </a>
+          <a className="button button-primary" href="#/">
+            Live map
+          </a>
+        </div>
+      </header>
+
+      <main className="admin-content">
+        {error && <p className="admin-error">{error}</p>}
+        {!trip && !error && <p className="admin-empty">Loading…</p>}
+
+        {trip && (
+          <>
+            <div className="admin-tiles">
+              <Fact label="Status" value={label(trip.status)} sub={trip.traffic_level && `${trip.traffic_level} traffic`} />
+              <Fact
+                label="Response time"
+                value={formatDuration(trip.response_seconds)}
+                sub={`Planned ${formatDuration(trip.planned_seconds)}`}
+              />
+              <Fact
+                label="Delay"
+                value={formatDuration(trip.delay_seconds)}
+                sub={trip.delay_reason ? `Reason: ${label(trip.delay_reason)}` : null}
+              />
+              <Fact
+                label="Stood still"
+                value={formatDuration(trip.stopped_seconds)}
+                sub={`${trip.events.filter((e) => e.kind === "STOP").length} stops of 10 s+ (${formatDuration(stopsTotal)})`}
+              />
+              <Fact
+                label="Signals green"
+                value={trip.route ? `${trip.route.signals_cleared}/${trip.route.signals_total}` : "--"}
+                sub={trip.route?.optimal_route_used === false ? `Re-routed ×${trip.route.reroutes}` : "Optimal route"}
+              />
+              <Fact
+                label="Distance"
+                value={formatDistance(trip.distance_meters)}
+                sub={trip.route ? `Police ${trip.route.police_on_scene}/${trip.route.police_alerts} on scene` : null}
+              />
+            </div>
+
+            <div className="trip-layout">
+              <section className="admin-card">
+                <h2>Route</h2>
+                <TripMap trip={trip} focus={focus} />
+              </section>
+
+              <section className="admin-card trip-timeline-card">
+                <div className="admin-card-heading">
+                  <h2>Timeline</h2>
+                  <select
+                    value={kindFilter}
+                    onChange={(event) => setKindFilter(event.target.value)}
+                    aria-label="Show events of kind"
+                  >
+                    <option value="">All events</option>
+                    {kinds.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {KINDS[kind]?.label || label(kind)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {events.length === 0 ? (
+                  <p className="admin-empty">
+                    No events recorded (trips from before this feature only
+                    have their totals).
+                  </p>
+                ) : (
+                  <ol className="trip-timeline">
+                    {events.map((event, index) => {
+                      const kind = KINDS[event.kind] || { label: event.kind, color: "#8b95a7" };
+                      const located = event.latitude != null && event.longitude != null;
+                      return (
+                        <li key={index}>
+                          <span className="trip-time">{since(event.seconds)}</span>
+                          <span className="trip-dot" style={{ background: kind.color }} />
+                          <div>
+                            <span className="trip-kind">{kind.label}</span>
+                            {located ? (
+                              <button
+                                className="trip-title"
+                                onClick={() => setFocus([event.latitude, event.longitude])}
+                                title="Show on the map"
+                              >
+                                {event.title}
+                              </button>
+                            ) : (
+                              <strong className="trip-title">{event.title}</strong>
+                            )}
+                            {event.detail && <p className="muted">{event.detail}</p>}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default TripDetail;

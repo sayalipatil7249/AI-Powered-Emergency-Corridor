@@ -36,12 +36,8 @@ import {
   policeZones,
   zoneSummary,
 } from "./policeZones";
-import AgentFeed from "./components/AgentFeed";
 import ChaseView from "./ChaseView";
-import LiveTrafficCard from "./components/LiveTrafficCard";
 import MovingMarker from "./components/MovingMarker";
-import PoliceAlertCard from "./components/PoliceAlertCard";
-import ResponseCard from "./components/ResponseCard";
 
 // Stretches of the route without signals (police cover them).
 const NO_SIGNAL_COLOR = "#c084fc";
@@ -257,13 +253,10 @@ function MapView({
   policeWatch,
   policeBoard,
   incidents = [],
-  onSimulateIncident,
-  incidentBusy = false,
   response,
   startPoint,
   hospitalPoint,
   overlay,
-  agentFeed = [],
   previewSignals = [],
   hospitalName,
   area,
@@ -297,7 +290,6 @@ function MapView({
   const start = startPoint || route[0];
   const hospital = hospitalPoint || route[route.length - 1];
   const arrived = ambulance?.status === "COMPLETED";
-  const driving = Boolean(ambulance) && !arrived;
 
   return (
     <div className={`map-wrapper ${pickMode ? "picking" : ""}`}>
@@ -724,8 +716,8 @@ function MapView({
 
       <div className="map-overlay map-overlay-top">{overlay}</div>
 
-      {/* Right side, top to bottom: controls, cards (scroll when there
-          are many), AI agent feed. One column, so nothing overlaps. */}
+      {/* Top right: view switch and follow toggle. The status cards are
+          in the side panel (LiveStatusPanel), so they never hide the map. */}
       <div className="map-overlay map-side">
         <div className="map-side-controls">
           <div className="view-toggle" role="group" aria-label="Map view">
@@ -754,40 +746,7 @@ function MapView({
             </label>
           )}
 
-          {onSimulateIncident && (
-            <button
-              className="button incident-button"
-              onClick={onSimulateIncident}
-              disabled={incidentBusy || !driving}
-              title="Block a road without signals ahead of the ambulance, to see the police alert, the phone call and the police clearing it"
-            >
-              {incidentBusy
-                ? "Blocking a road…"
-                : driving
-                  ? "⚠ Simulate accident ahead"
-                  : "⚠ Accident: after the ambulance sets off"}
-            </button>
-          )}
         </div>
-
-        <div className="map-side-cards">
-          <LiveTrafficCard live={liveTraffic} tripRunning={Boolean(ambulance)} />
-          {driving && (
-            <>
-              <ResponseCard response={response} />
-              <PoliceAlertCard
-                policeWatch={policeWatch}
-                board={policeBoard}
-                stations={policeStations}
-              />
-            </>
-          )}
-        </div>
-
-        <AgentFeed
-          messages={agentFeed}
-          departTime={ambulance?.depart_time}
-        />
       </div>
 
       <div className="map-overlay map-legend">

@@ -56,6 +56,9 @@ function ResponseCard({ response }) {
       {decision && decision.choice && (
         <p className="muted">
           Last decision: {CHOICE_LABELS[decision.choice]}
+          {decision.choice === "reroute" &&
+            decision.avoided &&
+            ` around ${decision.avoided} (${decision.reason})`}
           {decision.reroute_saving_seconds != null &&
             ` · a new route was estimated at ~${formatDuration(
               Math.abs(decision.reroute_saving_seconds)

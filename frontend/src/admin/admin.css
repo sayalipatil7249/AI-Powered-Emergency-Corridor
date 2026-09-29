@@ -1,0 +1,571 @@
+/* Admin dashboard (#/admin). Uses the app's tokens from index.css.
+   Status colours: fixed, validated on the dashboard surface, and always
+   shown with a text label. */
+
+.admin-page {
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.admin-section,
+.admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.admin-card h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-card .muted,
+.admin-card p.muted {
+  font-size: 12.5px;
+}
+
+.admin-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-card-heading p {
+  margin-top: 2px;
+}
+
+.admin-empty {
+  padding: 18px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-error {
+  padding: 10px 14px;
+  border: 1px solid rgba(208, 59, 59, 0.5);
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 13px;
+}
+
+.admin-link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* KPI tiles */
+
+.admin-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.admin-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.admin-tile-label {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.admin-tile-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-tile-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Outcome split: completed / cancelled / failed */
+
+.admin-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.admin-outcome-bar {
+  display: flex;
+  flex: 1 1 280px;
+  gap: 2px;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.admin-outcome-bar span {
+  min-width: 4px;
+}
+
+.admin-outcome-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.admin-outcome-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-outcome-legend strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.tone-good { background: var(--good); }
+.tone-warning { background: var(--warning); }
+.tone-critical { background: var(--critical); }
+.tone-neutral { background: var(--waiting); }
+
+/* Charts */
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.admin-tooltip span {
+  color: var(--muted);
+}
+
+/* Fast response measures */
+
+.admin-shares {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-share {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.admin-share-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-share-top strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-meter {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--passed);
+  overflow: hidden;
+}
+
+.admin-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #3987e5;
+}
+
+/* Tables */
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.admin-table td > .muted,
+.admin-table td > span.muted {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.admin-table.compact td {
+  padding: 7px 10px;
+}
+
+.admin-table select,
+.admin-filters select,
+.admin-filters input,
+.admin-form input,
+.admin-form select,
+.admin-form textarea,
+.admin-ticket-detail textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.admin-table td select {
+  display: block;
+  margin-top: 6px;
+}
+
+.admin-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #0b1120;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-status.tone-neutral {
+  color: var(--text);
+}
+
+.admin-priority {
+  font-weight: 700;
+}
+
+.admin-priority.priority-high { color: #f87171; }
+.admin-priority.priority-medium { color: #fcd34d; }
+.admin-priority.priority-low { color: var(--muted); }
+
+.admin-route-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.admin-route-facts li.fast {
+  color: #4ade80;
+  font-weight: 700;
+}
+
+.admin-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Grievances */
+
+.admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-filters input {
+  flex: 1 1 240px;
+}
+
+.admin-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
+.admin-form label,
+.admin-ticket-detail label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.admin-form .wide {
+  grid-column: 1 / -1;
+}
+
+.admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.admin-ticket-detail td {
+  background: var(--surface-raised);
+}
+
+.admin-ticket-detail p {
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+/* Small screens */
+
+@media (max-width: 900px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page .header {
+    flex-wrap: wrap;
+  }
+}
+
+/* Request links, problem junctions, trip page */
+
+.admin-request-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-request-link:hover {
+  text-decoration: underline;
+}
+
+.admin-tile-value.small {
+  font-size: 22px;
+}
+
+.admin-swatch.round {
+  border-radius: 50%;
+}
+
+.trip-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.trip-map {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trip-map .map {
+  height: 520px;
+  border-radius: 10px;
+}
+
+.trip-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trip-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trip-line {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.trip-line.dashed {
+  height: 0;
+  border-top: 3px dashed currentColor;
+  background: none;
+}
+
+.trip-timeline-card {
+  max-height: 640px;
+}
+
+.trip-timeline-card select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.trip-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0 4px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.trip-timeline li {
+  display: grid;
+  grid-template-columns: 78px 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+}
+
+.trip-time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.trip-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border-radius: 50%;
+}
+
+.trip-kind {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trip-title {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
+button.trip-title {
+  cursor: pointer;
+}
+
+button.trip-title:hover {
+  color: var(--accent);
+}
+
+.trip-timeline p {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1000px) {
+  .trip-layout {
+    grid-template-columns: 1fr;
+  }
+}

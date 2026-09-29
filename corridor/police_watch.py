@@ -47,7 +47,12 @@ MIN_SPEED_FOR_TIMING = 4.0      # m/s, for "when does the ambulance get there"
 STAND_DOWN_SECONDS = 60         # jam gone this long -> cancel the alert
 REALERT_SECONDS = 120           # no new alert (phone call) for the same
                                 # stretch this soon after one was closed
-MAX_CLEARING_SECONDS = 240      # officers stay at most this long
+MAX_CLEARING_SECONDS = 240      # officers on scene stand down after
+                                # this long, but only while the ambulance
+                                # is still over ALERT_HORIZON_SECONDS
+                                # away: otherwise the jam returns just
+                                # before it arrives and the next unit is
+                                # too far to help
 
 # A reported accident (not just heavy traffic) is alerted at once: there
 # is no need to wait for the queue behind it to build up.
@@ -168,6 +173,18 @@ class SignallessWatch:
                 continue
 
             distance = max(0.0, start - position)
+
+            # Officers hold the road until the ambulance is through; they
+            # only leave early when it is still far off (if the road jams
+            # again, a new alert brings police back in time).
+            if (
+                active
+                and active["status"] == "ON_SCENE"
+                and now - active["on_scene_at"] > MAX_CLEARING_SECONDS
+                and distance / speed > ALERT_HORIZON_SECONDS
+            ):
+                self._close(active, now, "CANCELLED", "the officers stood down")
+                continue
 
             # A reported accident on this stretch, ahead of the ambulance:
             # alert at once, however far ahead (police need the time).
@@ -401,8 +418,6 @@ class SignallessWatch:
                 alert["vehicles_waved"] += self.responder.control_junctions(
                     roads, self._roads
                 )
-                if now - alert["on_scene_at"] > MAX_CLEARING_SECONDS:
-                    self._close(alert, now, "CANCELLED", "the officers stood down")
 
     def _close(self, alert, now, status, why):
         if alert["status"] == "EN_ROUTE" and self.responder:
@@ -426,11 +441,11 @@ class SignallessWatch:
         self._event(f"Alert for {alert['road']} closed: {why}.")
         self.notify(dict(alert))
 
-    def close(self, now):
-        """Trip over: every unit stands down."""
+    def close(self, now, status="PASSED", why="the ambulance reached the hospital"):
+        """Trip over (or a new route): every unit stands down."""
         for alert in list(self.alerts.values()):
             if alert["status"] in ACTIVE:
-                self._close(alert, now, "PASSED", "the ambulance reached the hospital")
+                self._close(alert, now, status, why)
 
     def active_roads(self):
         """Roads police from this watch are clearing or heading to."""

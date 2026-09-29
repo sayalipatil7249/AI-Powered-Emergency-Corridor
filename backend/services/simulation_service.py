@@ -33,7 +33,9 @@ from corridor.engine import CorridorEngine
 from corridor.police_board import PoliceBoard
 from corridor.police_watch import SignallessWatch
 from corridor.response import DeadlockResponse
+from backend.services import admin_service
 from backend.services.police_notifier import police_notifier
+from backend.services.trip_recorder import TripRecorder
 from simulation import live_traffic
 from simulation.sumo import route_planner
 from simulation.sumo.adapters import (
@@ -146,6 +148,14 @@ class SimulationService:
 
         self.playback_speed = DEFAULT_PLAYBACK_SPEED
 
+        # The running trip's request in the admin log (admin_service):
+        # its id until it arrives, and the police alerts / officers on
+        # scene during it.
+        self._open_request = None
+        self._recorder = None      # what happens on the trip (trip_recorder.py)
+        self._trip_alerts = set()
+        self._trip_police_on_scene = set()
+
         # Live traffic (digital twin), when a TomTom key is configured.
         self.live_info = None
         self._pending_snapshot = None
@@ -234,6 +244,13 @@ class SimulationService:
         phone the station on a new alert, save every change in the
         database (police_calls), and tell the dashboard."""
 
+        # For the trip's route optimization log (admin dashboard).
+        if alert["status"] == "ALERTED":
+            self._trip_alerts.add(alert["alert_id"])
+        elif alert["status"] == "ON_SCENE":
+            self._trip_police_on_scene.add(alert["alert_id"])
+        self._record_police(alert)
+
         if alert["status"] == "ALERTED":
             police_notifier.alert(alert)  # phones the station, saves the alert
             self.add_agent_message(
@@ -249,6 +266,32 @@ class SimulationService:
                 f"Police alert for {alert['road']} closed: {alert['closed_reason']}.",
                 kind="police",
             )
+
+    def _record_police(self, alert):
+        """A police alert's change, for the trip's timeline."""
+        if self._recorder is None:
+            return
+        status = alert["status"]
+        if status == "ALERTED":
+            now, title = alert["alerted_at"], f"Police alerted: {alert['station']}"
+            detail = (
+                f"{alert['road']}: ambulance in ~{alert['ambulance_eta_seconds']:.0f} s, "
+                f"police can be there in ~{alert['police_eta_seconds']:.0f} s"
+            )
+        elif status == "ON_SCENE":
+            now, title = alert.get("on_scene_at"), f"Police reached {alert['road']}"
+            detail = f"Officers from {alert['station']} are clearing the road"
+        elif status in ("PASSED", "CANCELLED"):
+            now, title = alert.get("closed_at"), f"Police alert closed: {alert['road']}"
+            detail = alert.get("closed_reason")
+        else:
+            return
+        if now is None:
+            return
+        self._recorder.add(
+            now, "POLICE", title, detail=detail, road_name=alert["road"],
+            latitude=alert.get("latitude"), longitude=alert.get("longitude"),
+        )
 
     @staticmethod
     def _police_summary(police_watch):
@@ -284,6 +327,15 @@ class SimulationService:
             # Reported at once, like a real accident report: the police
             # are alerted now, not once the queue behind it has built up.
             context.police_watch.report_incident(road_id, context.now)
+            if self._recorder is not None:
+                self._recorder.add(
+                    context.now, "ACCIDENT",
+                    f"Accident on {route_planner.road_name(road_id) or stretch_name}",
+                    detail="Simulated crash: the road is blocked",
+                    road_name=route_planner.road_name(road_id) or stretch_name,
+                    latitude=incident.get("latitude"),
+                    longitude=incident.get("longitude"),
+                )
             return {
                 **incident,
                 "road": route_planner.road_name(road_id) or stretch_name,
@@ -371,6 +423,57 @@ class SimulationService:
             SumoSignalController(),
         )
 
+    def _record_signals(self, engine, signals, now):
+        """Signals the corridor started switching this second."""
+        for event in reversed(engine.events):
+            if event["time"] != now:
+                break
+            if event["type"] != "active" or event["message"].startswith("Part of"):
+                continue
+            position = signals.position(event["signal_id"]) or {}
+            name = signals.name(event["signal_id"]) or "a signal"
+            self._recorder.add(
+                now, "SIGNAL", f"Signal switched green: {name}",
+                detail=event["message"],
+                junction_name=name,
+                latitude=position.get("latitude"),
+                longitude=position.get("longitude"),
+            )
+
+    def _recorded(self, kind, title):
+        """The recorder's route, track and events for finish_request(),
+        ending with an event of this kind at the last recorded moment."""
+        recorder, self._recorder = self._recorder, None
+        if recorder is None:
+            return {}
+        recorder.finish(recorder.last_time)
+        recorder.add(recorder.last_time, kind, title)
+        return {
+            "route_geometry": recorder.route_geometry,
+            "track": recorder.track,
+            "events": recorder.events,
+        }
+
+    def _planned_seconds(self, level_index):
+        """The AI trip-time estimate for this route and traffic level
+        (what the delay is measured against), or None."""
+        try:
+            return route_planner.estimate_route_seconds(
+                self.trip["roads"], level_index
+            )
+        except Exception:
+            logger.exception("Could not estimate the planned trip time")
+            return None
+
+    def _route_meters(self, traffic):
+        """Length of the trip's roads (first lane of each), or None."""
+        try:
+            return round(sum(
+                traffic.lane_length(f"{road}_0") for road in self.trip["roads"]
+            ))
+        except Exception:
+            return None
+
     def _live_snapshot(self):
         """Live traffic along the trip and on main roads (TomTom)."""
 
@@ -444,6 +547,12 @@ class SimulationService:
 
         except Exception as error:
             logger.exception("Simulation error")
+            if self._open_request:
+                admin_service.finish_request(
+                    self._open_request, "FAILED", notes=f"Simulation error: {error}",
+                    **self._recorded("END", "Simulation error"),
+                )
+                self._open_request = None
             self.latest_state = _state(
                 "error",
                 error=str(error),
@@ -454,6 +563,15 @@ class SimulationService:
         finally:
             self.running = False
             self._fail_pending_requests()
+
+            # Stopped before the ambulance arrived.
+            if self._open_request:
+                admin_service.finish_request(
+                    self._open_request, "CANCELLED",
+                    notes="Simulation stopped before the ambulance arrived.",
+                    **self._recorded("END", "Stopped before arrival"),
+                )
+                self._open_request = None
 
             if simulation is not None:
                 try:
@@ -499,6 +617,16 @@ class SimulationService:
         was_moving = False
         dispatched = False
         last_live_fetch = time.time()
+
+        # For the admin dashboard's request log (admin_service): seconds
+        # standing still, re-routes, and the signals on the route / the
+        # ones switched green for the ambulance (across re-routes).
+        stopped_seconds = 0
+        reroutes = 0
+        route_signal_ids = set()
+        cleared_signal_ids = set()
+        self._trip_alerts = set()
+        self._trip_police_on_scene = set()
 
         while self.running and simulation.expected_vehicles() > 0:
             step_started = time.time()
@@ -555,6 +683,22 @@ class SimulationService:
                     "Ambulance dispatched: %s to %s.",
                     self.trip["start_name"], self.trip["hospital_name"],
                 )
+                self._open_request = admin_service.new_request_id()
+                self._recorder = TripRecorder(now)
+                self._recorder.add(
+                    now, "DISPATCH",
+                    f"Dispatched: {self.trip['start_name']} to {self.trip['hospital_name']}",
+                    detail=f"{TRAFFIC_LEVELS[level_index]} traffic",
+                )
+                admin_service.start_request(
+                    self._open_request,
+                    AMBULANCE_ID,
+                    self.trip["start_name"],
+                    self.trip["hospital_name"],
+                    TRAFFIC_LEVELS[level_index],
+                    self._planned_seconds(level_index),
+                    self._route_meters(traffic),
+                )
 
             # Warm-up: traffic builds up before the ambulance departs.
             # Run at full speed and only report progress.
@@ -581,6 +725,8 @@ class SimulationService:
                 if route_cache is None:
                     route_cache = RouteCache(ambulance, traffic)
                     route_geometry = feed.route_geometry(ambulance, traffic)
+                    if self._recorder is not None:
+                        self._recorder.set_route(route_geometry)
                     engine.build_route_signals()
                     depart_time = ambulance.departure_time()
 
@@ -601,6 +747,7 @@ class SimulationService:
                         busy_roads=lambda: (
                             police_watch.active_roads() if police_watch else set()
                         ),
+                        incident_roads=incidents.active_roads,
                     )
                     response.set_route(
                         deadlock.route_info(ambulance.route(), traffic)
@@ -628,6 +775,8 @@ class SimulationService:
                 if was_moving and not moving:
                     stops += 1
                 was_moving = moving
+                if not moving:
+                    stopped_seconds += 1  # one simulated second per step
                 snapshot["stops"] = stops
                 last_snapshot = snapshot
 
@@ -641,8 +790,16 @@ class SimulationService:
                     else None
                 )
                 engine.apply(upcoming, now, seconds_to_next)
+                if self._recorder is not None:
+                    self._recorder.step(now, snapshot)
+                    self._record_signals(engine, signals, now)
+                route_signal_ids.update(
+                    item.get("signal_id") for item in engine.route_signals
+                )
+                cleared_signal_ids |= engine.overridden_signals
 
                 if response.step(now) == "rerouted":
+                    reroutes += 1
                     # New route: signals, route data and map line anew.
                     engine.reset()
                     engine.route_signals = []
@@ -654,7 +811,9 @@ class SimulationService:
                         deadlock.route_info(ambulance.route(), traffic)
                     )
                     # New route, new stretches without signals.
-                    police_watch.close(now)
+                    police_watch.close(
+                        now, "CANCELLED", "the ambulance was re-routed"
+                    )
                     police_watch = SignallessWatch(
                         ambulance, traffic,
                         route_planner.route_police_plan(ambulance.route())[0],
@@ -673,11 +832,53 @@ class SimulationService:
                 # Show the response's decisions in the dashboard feed.
                 for message in list(response.events)[events_shown:]:
                     self.add_agent_message(message, kind="response")
+                    if self._recorder is not None:
+                        rerouted = "Re-routed" in message
+                        self._recorder.add(
+                            now, "REROUTE" if rerouted else "AI",
+                            "Re-routed" if rerouted else "AI deadlock watch",
+                            detail=message,
+                            latitude=snapshot.get("latitude"),
+                            longitude=snapshot.get("longitude"),
+                            data={"route": route_geometry} if rerouted else None,
+                        )
                 events_shown = len(response.events)
 
             else:
                 if arrival_time is None:
                     logger.info("Ambulance reached the hospital.")
+                    if self._open_request:
+                        route_signal_ids.discard(None)
+                        if self._recorder is not None:
+                            self._recorder.finish(now)
+                            self._recorder.add(
+                                now, "ARRIVAL",
+                                f"Reached {self.trip['hospital_name']}",
+                                detail=f"{(now - depart_time) / 60:.1f} min after setting off",
+                            )
+                        recorder, self._recorder = self._recorder, None
+                        admin_service.finish_request(
+                            self._open_request,
+                            "COMPLETED",
+                            response_seconds=now - depart_time,
+                            stopped_seconds=stopped_seconds,
+                            stops=stops,
+                            route={
+                                "optimal_route_used": reroutes == 0,
+                                "signals_total": len(route_signal_ids),
+                                "signals_cleared": len(
+                                    cleared_signal_ids & route_signal_ids
+                                ),
+                                "police_alerts": len(self._trip_alerts),
+                                "police_on_scene": len(self._trip_police_on_scene),
+                                "reroutes": reroutes,
+                                "incidents": len(incidents.summary()),
+                            },
+                            route_geometry=recorder.route_geometry if recorder else None,
+                            track=recorder.track if recorder else None,
+                            events=recorder.events if recorder else None,
+                        )
+                        self._open_request = None
                     engine.reset()
                     if response:
                         response.close()
