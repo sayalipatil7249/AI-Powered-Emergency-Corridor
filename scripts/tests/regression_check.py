@@ -19,11 +19,13 @@ from multiprocessing import Pool
 
 import ai.run_experiments as runner
 
+# (traffic level, traffic seed, ambulance departure, corridor mode: a key
+# of ai.run_experiments.TIMINGS - "on" = AI timing, "off" = no corridor)
 CONFIGS = [
-    ("light", 1, 600, True),
-    ("normal", 2, 600, False),
-    ("heavy", 3, 900, True),
-    ("heavy", 5, 1200, True),
+    ("light", 1, 600, "on"),
+    ("normal", 2, 600, "off"),
+    ("heavy", 3, 900, "on"),
+    ("heavy", 5, 1200, "on"),
 ]
 
 
