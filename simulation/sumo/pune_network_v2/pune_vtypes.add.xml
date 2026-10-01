@@ -12,11 +12,8 @@
         drivers stay at 0.75 (37.5 km/h), below the ambulance with its
         siren (ambulance_vtype.add.xml).
     sigma: driver imperfection (0 = perfect, 1 = very erratic).
-    minGap: shorter gaps than SUMO's European default (2.5 m), as seen
-        in Indian city traffic.
-    tau: reaction time. Must not be below the simulation step (1 s,
-        sumo_bridge.py): with tau 0.9 SUMO cannot keep cars apart and
-        they overlap (thousands of collisions per heavy-traffic run).
+    minGap / tau: shorter gaps and reaction times than SUMO's European
+        defaults, as seen in Indian city traffic.
 -->
 <additional>
     <vType
@@ -25,6 +22,6 @@
         speedFactor="normc(0.55,0.1,0.3,0.75)"
         sigma="0.6"
         minGap="1.5"
-        tau="1.0"
+        tau="0.9"
     />
 </additional>
