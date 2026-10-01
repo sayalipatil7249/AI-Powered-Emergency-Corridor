@@ -16,7 +16,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
-from simulation.sumo.sumo_bridge import SUMO_HOME
+import sumo
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -76,7 +76,7 @@ def generate_traffic(level, seed, output_dir=SCENARIO_DIR):
     if os.path.exists(route_file):
         return route_file
 
-    random_trips = os.path.join(SUMO_HOME, "tools", "randomTrips.py")
+    random_trips = os.path.join(sumo.SUMO_HOME, "tools", "randomTrips.py")
 
     command = [
         sys.executable,

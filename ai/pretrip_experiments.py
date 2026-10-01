@@ -23,6 +23,8 @@ import sys
 import time
 from multiprocessing import Pool
 
+import sumo
+
 from ai.clearance import clearance_predictor
 from ai.eta_model import estimate as estimate_eta
 from ai.features import RouteCache
@@ -38,14 +40,13 @@ from simulation.sumo.adapters import (
 from simulation.sumo.sumo_bridge import (
     AMBULANCE_DEPART_TIME,
     AMBULANCE_VTYPE_FILE,
-    SUMO_HOME,
     VTYPES_FILE,
     apply_city_speed_limits,
 )
 
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "pretrip")
 TRIPS_FILE = os.path.join(OUTPUT_DIR, "trips.csv")
-SUMO_BINARY = os.path.join(SUMO_HOME, "bin", "sumo")
+SUMO_BINARY = os.path.join(sumo.SUMO_HOME, "bin", "sumo")
 AMBULANCE_ID = "ambulance_01"
 
 # Routes long enough to matter, short enough to fit the area.

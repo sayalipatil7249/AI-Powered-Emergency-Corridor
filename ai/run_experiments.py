@@ -23,6 +23,8 @@ import sys
 import time
 from multiprocessing import Pool
 
+import sumo
+
 from ai.clearance import clearance_predictor
 from ai.eta_model import next_signal_seconds
 from ai.features import AMBULANCE_ID, FEATURE_COLUMNS, RouteCache, extract_features
@@ -33,7 +35,7 @@ from simulation.sumo.adapters import (
     SumoSimulation,
     SumoTrafficSource,
 )
-from simulation.sumo.sumo_bridge import SUMO_HOME, apply_city_speed_limits
+from simulation.sumo.sumo_bridge import apply_city_speed_limits
 from ai.scenarios import (
     NET_FILE,
     PROJECT_ROOT,
@@ -46,7 +48,7 @@ from ai.scenarios import (
 RUNS_DIR = os.path.join(PROJECT_ROOT, "data", "runs")
 SUMMARY_FILE = os.path.join(RUNS_DIR, "summary.csv")
 
-SUMO_BINARY = os.path.join(SUMO_HOME, "bin", "sumo")
+SUMO_BINARY = os.path.join(sumo.SUMO_HOME, "bin", "sumo")
 
 # Give up on a trip that takes longer than this (seconds).
 MAX_TRIP_SECONDS = 2400

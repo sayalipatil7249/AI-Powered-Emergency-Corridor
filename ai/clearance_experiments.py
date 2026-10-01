@@ -26,6 +26,8 @@ import sys
 import time
 from multiprocessing import Pool
 
+import sumo
+
 from ai.clearance import (
     FEATURE_COLUMNS,
     MAX_CLEARANCE_SECONDS,
@@ -45,10 +47,10 @@ from simulation.sumo.adapters import (
     SumoSimulation,
     SumoTrafficSource,
 )
-from simulation.sumo.sumo_bridge import SUMO_HOME, apply_city_speed_limits
+from simulation.sumo.sumo_bridge import apply_city_speed_limits
 
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "clearance")
-SUMO_BINARY = os.path.join(SUMO_HOME, "bin", "sumo")
+SUMO_BINARY = os.path.join(sumo.SUMO_HOME, "bin", "sumo")
 
 # Simulated seconds per run, junctions switched at the same time, and
 # how long a junction is left alone after a test.
