@@ -22,6 +22,7 @@ from sqlalchemy import distinct, func, or_, text
 from backend.database import SessionLocal, engine
 from backend.models.ambulance_request import (
     DELAY_REASONS,
+    PLAN_STATUSES,
     REQUEST_STATUSES,
     AmbulanceRequest,
 )
@@ -48,11 +49,38 @@ TRAFFIC_SHARE = 0.4
 def ensure_schema():
     """Add columns introduced after ambulance_requests was first created
     (create_all makes new tables but never changes existing ones)."""
+    columns = {"route_geometry": "JSON", "track": "JSON", "plan_status": "VARCHAR(20)"}
     with engine.begin() as connection:
-        for column in ("route_geometry", "track"):
+        for column, kind in columns.items():
             connection.execute(text(
-                f"ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS {column} JSON"
+                f"ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS {column} {kind}"
             ))
+
+
+def close_interrupted_requests():
+    """
+    Mark requests left IN_PROGRESS by an earlier run of the backend as
+    FAILED. Only called at startup, when no trip can be running: the
+    simulation lives in this process, so a request still open now was
+    cut off when the backend stopped (its finish_request never ran).
+    Returns how many were closed.
+    """
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(AmbulanceRequest)
+            .filter(AmbulanceRequest.status == "IN_PROGRESS")
+            .all()
+        )
+        now = datetime.now()
+        for row in rows:
+            row.status = "FAILED"
+            row.notes = "The backend stopped while this trip was running."
+            row.updated_at = now
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
 
 
 # -------------------------------------------------------------
@@ -64,8 +92,12 @@ def new_request_id(now=None):
 
 
 def start_request(request_id, ambulance_id, start_name, hospital_name,
-                  traffic_level, planned_seconds, distance_meters):
-    """The ambulance was dispatched."""
+                  traffic_level, planned_seconds, distance_meters,
+                  plan_status=None):
+    """The ambulance was dispatched. plan_status: one of PLAN_STATUSES
+    (why planned_seconds is or isn't there)."""
+    if plan_status is None:
+        plan_status = "OK" if planned_seconds is not None else "NO_ESTIMATE"
     db = SessionLocal()
     try:
         now = datetime.now()
@@ -77,6 +109,7 @@ def start_request(request_id, ambulance_id, start_name, hospital_name,
             status="IN_PROGRESS",
             traffic_level=traffic_level,
             planned_seconds=planned_seconds,
+            plan_status=plan_status,
             distance_meters=distance_meters,
             dispatched_at=now,
             source="simulation",
@@ -92,8 +125,11 @@ def start_request(request_id, ambulance_id, start_name, hospital_name,
 
 
 def classify_delay(delay_seconds, stopped_seconds, reroutes, incidents):
-    """Why a trip was late, from what happened on the way."""
-    if delay_seconds is None or delay_seconds <= ON_TIME_TOLERANCE_SECONDS:
+    """Why a trip was late, from what happened on the way. None when
+    there is no delay to explain (no planned time to compare with)."""
+    if delay_seconds is None:
+        return None
+    if delay_seconds <= ON_TIME_TOLERANCE_SECONDS:
         return "NONE"
     if incidents:
         return "ACCIDENT"
@@ -231,11 +267,12 @@ def kpi_summary(db, days=None):
         func.avg(AmbulanceRequest.delay_seconds),
         func.avg(AmbulanceRequest.planned_seconds),
     ).one()
-    on_time = completed.filter(
-        or_(
-            AmbulanceRequest.delay_seconds.is_(None),
-            AmbulanceRequest.delay_seconds <= ON_TIME_TOLERANCE_SECONDS,
-        )
+    # On time is only known for trips with a planned time (delay set);
+    # the others are counted separately, never as on time.
+    with_plan = completed.filter(AmbulanceRequest.delay_seconds.isnot(None))
+    planned_trips = with_plan.count()
+    on_time = with_plan.filter(
+        AmbulanceRequest.delay_seconds <= ON_TIME_TOLERANCE_SECONDS
     ).count()
 
     finished = sum(counts.get(status, 0) for status in ("COMPLETED", "CANCELLED", "FAILED"))
@@ -254,7 +291,9 @@ def kpi_summary(db, days=None):
         "total_requests": sum(counts.values()),
         "by_status": {status: counts.get(status, 0) for status in REQUEST_STATUSES},
         "success_rate": round(total_completed / finished, 3) if finished else None,
-        "on_time_rate": round(on_time / total_completed, 3) if total_completed else None,
+        "on_time_rate": round(on_time / planned_trips, 3) if planned_trips else None,
+        "completed_with_plan": planned_trips,
+        "completed_without_plan": total_completed - planned_trips,
         "avg_response_seconds": rounded(averages[0]),
         "avg_delay_seconds": rounded(averages[1]),
         "avg_planned_seconds": rounded(averages[2]),
@@ -330,6 +369,7 @@ def request_dict(row, log=None):
         "traffic_level": row.traffic_level,
         "distance_meters": row.distance_meters,
         "planned_seconds": row.planned_seconds,
+        "plan_status": row.plan_status,
         "dispatched_at": row.dispatched_at,
         "arrived_at": row.arrived_at,
         "response_seconds": row.response_seconds,
@@ -393,6 +433,8 @@ def route_summary(db, days=None):
     ).one()
     return {
         "trips": total,
+        # Fast arrival is only known for trips with a planned time.
+        "trips_with_plan": query.filter(RouteOptimizationLog.seconds_vs_plan.isnot(None)).count(),
         "fast_arrivals": query.filter(RouteOptimizationLog.fast_arrival.is_(True)).count(),
         "optimal_route_used": query.filter(RouteOptimizationLog.optimal_route_used.is_(True)).count(),
         "corridor_cleared": query.filter(RouteOptimizationLog.corridor_cleared.is_(True)).count(),

@@ -53,6 +53,17 @@ export function label(value) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+// Why a trip has no planned time (plan_status, backend PLAN_STATUSES).
+const PLAN_PROBLEMS = {
+  MODEL_MISSING: "The AI pre-trip model is not trained (pretrip.joblib missing)",
+  NO_ESTIMATE: "The AI pre-trip model gave no estimate for this route",
+  ERROR: "The AI pre-trip estimate failed (see the backend log)",
+};
+
+export function planProblem(planStatus) {
+  return PLAN_PROBLEMS[planStatus] || "No planned time was recorded for this trip";
+}
+
 export function formatPercent(share) {
   return share == null ? "--" : `${Math.round(share * 100)}%`;
 }

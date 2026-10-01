@@ -18,6 +18,15 @@ DELAY_REASONS = (
     "OTHER",
 )
 
+# Whether the AI pre-trip model (ai/pretrip.py) gave a planned time.
+# Without one there is no delay, so the trip is neither on time nor late.
+PLAN_STATUSES = (
+    "OK",              # planned_seconds is the model's estimate
+    "MODEL_MISSING",   # ai/models/pretrip.joblib not found (not trained)
+    "NO_ESTIMATE",     # model loaded, but no estimate for this route
+    "ERROR",           # the estimate raised an error
+)
+
 
 # One ambulance request (trip): when it was dispatched and arrived, how
 # long it took against the plan, and why it was late. Written by the live
@@ -47,6 +56,10 @@ class AmbulanceRequest(Base):
 
     # The route planner's estimate for this traffic level
     planned_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # One of PLAN_STATUSES. NULL on rows recorded before it existed:
+    # those have a plan exactly when planned_seconds is set.
+    plan_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     dispatched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 

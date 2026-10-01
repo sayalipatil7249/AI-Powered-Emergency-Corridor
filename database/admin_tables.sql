@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS ambulance_requests (
 	status VARCHAR(20) NOT NULL, 
 	traffic_level VARCHAR(10), 
 	distance_meters FLOAT, 
-	planned_seconds FLOAT, 
+	planned_seconds FLOAT,
+	plan_status VARCHAR(20),
 	dispatched_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	arrived_at TIMESTAMP WITHOUT TIME ZONE, 
 	response_seconds FLOAT, 
@@ -106,3 +107,6 @@ CREATE INDEX IF NOT EXISTS ix_trip_events_request_id ON trip_events (request_id)
 -- Upgrading a database made before the trip page existed:
 ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS route_geometry JSON;
 ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS track JSON;
+
+-- Upgrading a database made before plan_status existed:
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS plan_status VARCHAR(20);

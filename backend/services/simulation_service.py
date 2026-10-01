@@ -23,7 +23,7 @@ from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass
 
-from ai import deadlock
+from ai import deadlock, pretrip
 from ai.clearance import clearance_predictor
 from ai.pretrip import TRAFFIC_LEVELS
 from ai.eta_model import estimate as estimate_eta
@@ -456,14 +456,22 @@ class SimulationService:
 
     def _planned_seconds(self, level_index):
         """The AI trip-time estimate for this route and traffic level
-        (what the delay is measured against), or None."""
+        (what the delay is measured against): (seconds or None, plan
+        status), the status saying why there is no estimate."""
+        if not os.path.exists(pretrip.MODEL_FILE):
+            logger.warning("No planned trip time: %s not found", pretrip.MODEL_FILE)
+            return None, "MODEL_MISSING"
         try:
-            return route_planner.estimate_route_seconds(
+            seconds = route_planner.estimate_route_seconds(
                 self.trip["roads"], level_index
             )
         except Exception:
             logger.exception("Could not estimate the planned trip time")
-            return None
+            return None, "ERROR"
+        if seconds is None:
+            logger.warning("No planned trip time for this route")
+            return None, "NO_ESTIMATE"
+        return seconds, "OK"
 
     def _route_meters(self, traffic):
         """Length of the trip's roads (first lane of each), or None."""
@@ -690,14 +698,16 @@ class SimulationService:
                     f"Dispatched: {self.trip['start_name']} to {self.trip['hospital_name']}",
                     detail=f"{TRAFFIC_LEVELS[level_index]} traffic",
                 )
+                planned_seconds, plan_status = self._planned_seconds(level_index)
                 admin_service.start_request(
                     self._open_request,
                     AMBULANCE_ID,
                     self.trip["start_name"],
                     self.trip["hospital_name"],
                     TRAFFIC_LEVELS[level_index],
-                    self._planned_seconds(level_index),
+                    planned_seconds,
                     self._route_meters(traffic),
+                    plan_status=plan_status,
                 )
 
             # Warm-up: traffic builds up before the ambulance departs.

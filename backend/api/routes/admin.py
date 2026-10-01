@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
-from backend.models.ambulance_request import DELAY_REASONS, REQUEST_STATUSES
+from backend.models.ambulance_request import DELAY_REASONS, PLAN_STATUSES, REQUEST_STATUSES
 from backend.models.grievance import (
     GRIEVANCE_CATEGORIES,
     GRIEVANCE_PRIORITIES,
@@ -61,6 +61,7 @@ def get_options():
     return {
         "request_statuses": REQUEST_STATUSES,
         "delay_reasons": DELAY_REASONS,
+        "plan_statuses": PLAN_STATUSES,
         "grievance_roles": GRIEVANCE_ROLES,
         "grievance_categories": GRIEVANCE_CATEGORIES,
         "grievance_priorities": GRIEVANCE_PRIORITIES,

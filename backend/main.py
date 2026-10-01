@@ -79,9 +79,15 @@ try:
 except Exception as error:
     logging.getLogger(__name__).warning("Could not sync police stations: %s", error)
 
-# Admin dashboard: add the trip map columns to an older requests table.
+# Admin dashboard: add newer columns to an older requests table, and
+# close trips a previous run of the backend left IN_PROGRESS.
 try:
     admin_service.ensure_schema()
+    closed = admin_service.close_interrupted_requests()
+    if closed:
+        logging.getLogger(__name__).warning(
+            "Marked %d interrupted trip(s) as FAILED.", closed
+        )
 except Exception as error:
     logging.getLogger(__name__).warning("Could not update the admin tables: %s", error)
 

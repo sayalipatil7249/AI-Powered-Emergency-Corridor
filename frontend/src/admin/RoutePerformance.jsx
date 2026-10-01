@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { formatDistance, formatDuration } from "../routeStatus";
-import { formatDateTime, formatPercent, label } from "./adminApi";
+import { formatDateTime, formatPercent, label, planProblem } from "./adminApi";
 
 function Share({ label: title, part, whole, note }) {
   const share = whole ? part / whole : null;
@@ -41,8 +41,13 @@ export function RouteSummary({ summary }) {
         <Share
           label="Fast arrivals"
           part={summary.fast_arrivals}
-          whole={summary.trips}
-          note={`${summary.fast_arrivals} of ${summary.trips} trips on or ahead of plan`}
+          whole={summary.trips_with_plan}
+          note={
+            `${summary.fast_arrivals} of ${summary.trips_with_plan} planned trips on or ahead of plan` +
+            (summary.trips > summary.trips_with_plan
+              ? ` · ${summary.trips - summary.trips_with_plan} without a plan left out`
+              : "")
+          }
         />
         <Share
           label="Optimal route kept"
@@ -150,9 +155,18 @@ export function RequestsTable({ requests, delayReasons, onChangeReason, busyId }
                   </td>
                   <td>
                     {formatDuration(row.response_seconds)}
-                    <span className="muted">
-                      plan {formatDuration(row.planned_seconds)}
-                    </span>
+                    {row.planned_seconds != null ? (
+                      <span className="muted">
+                        plan {formatDuration(row.planned_seconds)}
+                      </span>
+                    ) : (
+                      <span
+                        className="admin-status tone-warning"
+                        title={planProblem(row.plan_status)}
+                      >
+                        No plan
+                      </span>
+                    )}
                   </td>
                   <td>
                     {formatDuration(row.delay_seconds)}
@@ -165,13 +179,18 @@ export function RequestsTable({ requests, delayReasons, onChangeReason, busyId }
                   <td>
                     {row.status === "COMPLETED" ? (
                       <select
-                        value={row.delay_reason || "NONE"}
+                        value={row.delay_reason || ""}
                         disabled={busyId === row.request_id}
                         onChange={(event) =>
                           onChangeReason(row.request_id, event.target.value)
                         }
                         aria-label={`Delay reason for ${row.request_id}`}
                       >
+                        {!row.delay_reason && (
+                          <option value="" disabled>
+                            Unknown (no plan)
+                          </option>
+                        )}
                         {delayReasons.map((reason) => (
                           <option key={reason} value={reason}>
                             {reason === "NONE" ? "None (on time)" : label(reason)}

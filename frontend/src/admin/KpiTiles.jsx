@@ -24,6 +24,12 @@ function KpiTiles({ kpis }) {
 
   const byStatus = kpis.by_status || {};
   const finished = OUTCOMES.reduce((sum, item) => sum + (byStatus[item.key] || 0), 0);
+  // Trips the AI pre-trip model gave no planned time: on time and delay
+  // are unknown for them, so they are left out of those figures.
+  const withoutPlan = kpis.completed_without_plan || 0;
+  const withoutPlanNote = withoutPlan
+    ? ` · ${withoutPlan} without a plan left out`
+    : "";
 
   return (
     <section className="admin-section" aria-label="Key figures">
@@ -54,12 +60,12 @@ function KpiTiles({ kpis }) {
         <Tile
           label="On time"
           value={formatPercent(kpis.on_time_rate)}
-          sub="Completed within 1 min of plan"
+          sub={`Within 1 min of plan, of ${kpis.completed_with_plan ?? 0} planned trips${withoutPlanNote}`}
         />
         <Tile
           label="Avg delay"
           value={formatDuration(kpis.avg_delay_seconds)}
-          sub="Beyond the planned time"
+          sub={`Beyond the planned time${withoutPlanNote}`}
         />
         <Tile
           label="Open grievances"

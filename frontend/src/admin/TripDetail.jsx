@@ -12,7 +12,7 @@ import "leaflet/dist/leaflet.css";
 import SvgIcon from "../components/SvgIcon";
 import { HOSPITAL_ICON } from "../icons";
 import { formatDistance, formatDuration } from "../routeStatus";
-import { adminApi, formatDateTime, label } from "./adminApi";
+import { adminApi, formatDateTime, label, planProblem } from "./adminApi";
 import "./admin.css";
 
 // What each event kind looks like. Colours carry identity only; the
@@ -246,12 +246,22 @@ function TripDetail({ requestId }) {
               <Fact
                 label="Response time"
                 value={formatDuration(trip.response_seconds)}
-                sub={`Planned ${formatDuration(trip.planned_seconds)}`}
+                sub={
+                  trip.planned_seconds != null
+                    ? `Planned ${formatDuration(trip.planned_seconds)}`
+                    : `No plan: ${planProblem(trip.plan_status)}`
+                }
               />
               <Fact
                 label="Delay"
-                value={formatDuration(trip.delay_seconds)}
-                sub={trip.delay_reason ? `Reason: ${label(trip.delay_reason)}` : null}
+                value={trip.planned_seconds != null ? formatDuration(trip.delay_seconds) : "Unknown"}
+                sub={
+                  trip.delay_reason
+                    ? `Reason: ${label(trip.delay_reason)}`
+                    : trip.planned_seconds == null
+                      ? "No planned time to compare with"
+                      : null
+                }
               />
               <Fact
                 label="Stood still"
