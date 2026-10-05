@@ -378,6 +378,7 @@ function App() {
               policeWatch={showPlan ? null : simulationState?.police_watch}
               policeBoard={showPlan ? null : simulationState?.police_board}
               policeStations={policeStations}
+              giveWay={showPlan ? null : simulationState?.give_way}
               agentFeed={simulationState?.agent_feed || []}
               onSimulateIncident={running ? simulateIncident : null}
               incidentBusy={incidentBusy}

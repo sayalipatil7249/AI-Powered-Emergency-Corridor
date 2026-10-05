@@ -1,4 +1,5 @@
 import AgentFeed from "./AgentFeed";
+import GiveWayCard from "./GiveWayCard";
 import LiveTrafficCard from "./LiveTrafficCard";
 import PoliceAlertCard from "./PoliceAlertCard";
 import ResponseCard from "./ResponseCard";
@@ -13,6 +14,7 @@ function LiveStatusPanel({
   policeWatch,
   policeBoard,
   policeStations = [],
+  giveWay = null,
   agentFeed = [],
   onSimulateIncident,
   incidentBusy = false,
@@ -46,6 +48,7 @@ function LiveStatusPanel({
       {driving && (
         <>
           <ResponseCard response={response} />
+          <GiveWayCard giveWay={giveWay} />
           <PoliceAlertCard
             policeWatch={policeWatch}
             board={policeBoard}

@@ -40,6 +40,7 @@ from simulation import live_traffic
 from simulation.sumo import route_planner
 from simulation.sumo.adapters import (
     SumoAmbulanceTracker,
+    SumoGiveWay,
     SumoIncidents,
     SumoResponder,
     SumoSignalController,
@@ -59,6 +60,10 @@ from simulation.sumo.sumo_bridge import (
 logger = logging.getLogger(__name__)
 
 AMBULANCE_ID = "ambulance_01"
+
+# Drivers ahead of the ambulance and police cars make room for the
+# siren (SumoGiveWay). GIVE_WAY=0 in .env switches it off.
+GIVE_WAY = os.environ.get("GIVE_WAY", "1") != "0"
 
 # Keep showing the finished trip this long (simulated seconds),
 # then stop the simulation automatically.
@@ -113,6 +118,17 @@ def demo_trip():
     }
 
 
+def _mark_pulled_over(vehicles, give_way):
+    """Flag drivers waiting at the roadside for the siren, so the map
+    draws them beside the lane instead of on it."""
+    if give_way is None or not give_way.pulled_over:
+        return vehicles
+    for vehicle in vehicles:
+        if vehicle["vehicle_id"] in give_way.pulled_over:
+            vehicle["pulled_over"] = True
+    return vehicles
+
+
 def _state(status, **values):
     return {
         "status": status,
@@ -128,6 +144,7 @@ def _state(status, **values):
         "police_watch": None,
         "police_board": None,
         "incidents": [],
+        "give_way": None,
         **values,
     }
 
@@ -614,6 +631,7 @@ class SimulationService:
         # and simulated accidents (the dashboard's button).
         police_board = None
         incidents = SumoIncidents()
+        give_way = SumoGiveWay() if GIVE_WAY else None
         level_index = TRAFFIC_LEVELS.index(
             getattr(self, "_traffic_level", "normal")
         )
@@ -790,6 +808,10 @@ class SimulationService:
                 snapshot["stops"] = stops
                 last_snapshot = snapshot
 
+                # Drivers ahead hear the siren and make room.
+                if give_way is not None:
+                    give_way.step(AMBULANCE_ID, now)
+
                 upcoming = engine.upcoming_signals()
                 # The AI's predicted arrival at the junction ahead decides
                 # when that signal switches (corridor/engine.py).
@@ -894,6 +916,9 @@ class SimulationService:
                         response.close()
                     if police_watch:
                         police_watch.close(now)
+                    if give_way is not None:
+                        logger.info("Drivers who made room: %s", give_way.status())
+                        give_way.release_all()
                     arrival_time = now
 
                 snapshot = {
@@ -908,7 +933,9 @@ class SimulationService:
                 "running",
                 simulation_time=now,
                 ambulance=snapshot,
-                vehicles=traffic.vehicles(exclude=AMBULANCE_ID),
+                vehicles=_mark_pulled_over(
+                    traffic.vehicles(exclude=AMBULANCE_ID), give_way
+                ),
                 signals=feed.signal_states(signals, upcoming),
                 corridor=feed.corridor_entries(
                     upcoming, signals, snapshot.get("speed", 0), engine
@@ -925,6 +952,7 @@ class SimulationService:
                 police_watch=self._police_summary(police_watch),
                 police_board=police_board.summary() if police_board else None,
                 incidents=incidents.summary(),
+                give_way=give_way.status() if give_way else None,
             )
 
             # One simulated second takes 1 / playback_speed real seconds.

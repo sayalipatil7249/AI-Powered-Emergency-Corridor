@@ -7,10 +7,14 @@ The system runs on a real road network of **Pune, India** (from OpenStreetMap), 
 **SUMO**. A **FastAPI** backend watches the ambulance every second and controls the traffic
 lights, and a **React** dashboard shows it all live on a map.
 
-> **Current scope:** this is a demo built around **one fixed, tested route**. `ambulance_01`
-> drives about 3.7 km (the fastest route) to **Ruby Hall Clinic** through realistic Pune traffic (hundreds to thousands of
-> vehicles). Signal control is rule-based; the arrival time (ETA) comes from a machine-learning
-> model trained on simulated trips (see [AI layer](#ai-layer)).
+> **Current scope:** one ambulance (`ambulance_01`) at a time, on any start point and hospital
+> inside a ~5 × 4 km area of central Pune, through realistic traffic (hundreds to thousands of
+> vehicles, optionally copied from live TomTom data). The default demo trip is Shukrawar Peth →
+> **Ruby Hall Clinic** (about 3.7 km). Machine-learning models predict the arrival time, when
+> each signal must switch, the trip time before departure and deadlocks ahead
+> (see [AI layer](#ai-layer)). Police stations along the route are alerted (and phoned) for
+> jams on roads without signals, and every trip is recorded for the
+> [admin dashboard](#admin-dashboard).
 
 ---
 
@@ -19,13 +23,15 @@ lights, and a **React** dashboard shows it all live on a map.
 ```
  ┌──────────────┐   TraCI    ┌───────────────────────┐  WebSocket  ┌──────────────────┐
  │  SUMO        │ ◄────────► │  FastAPI backend      │ ──────────► │  React dashboard │
- │  (Pune roads,│  control   │  simulation_service   │  every 0.5s │  (Leaflet map)   │
- │  cars, lights│  & read    │  corridor logic       │             │                  │
+ │  (Pune roads,│  control   │  simulation_service   │  every 0.5s │  2D map, 3D view │
+ │  cars, lights│  & read    │  corridor logic       │             │  admin dashboard │
  └──────────────┘            └──────────┬────────────┘             └──────────────────┘
                                         │
-                              PostgreSQL + PostGIS
-                        (ambulances, hospitals, signals,
-                         emergencies, nearest-hospital)
+                  ┌─────────────────────┼──────────────────────┐
+          PostgreSQL + PostGIS     TomTom (live traffic)   Twilio (police calls)
+     (police stations, call log,
+      recorded trips, grievances,
+      hospitals, signals)
 ```
 
 1. SUMO simulates the city, one step per second.
@@ -50,7 +56,9 @@ lights, and a **React** dashboard shows it all live on a map.
    yellow phase). When the
    ambulance reaches the hospital, every light is restored.
 5. The dashboard receives the live state over a WebSocket and draws the ambulance, the cars,
-   the lights and the corridor.
+   the lights and the corridor, on a 2D map or in a 3D chase view.
+6. When the trip ends, its timeline (stops, signals, police, accidents, re-routes, driven
+   track) is saved to PostgreSQL for the admin dashboard.
 
 ---
 
@@ -81,10 +89,12 @@ simulations and checks that a refactor did not change their results.
 | Layer | Technology |
 |---|---|
 | Simulation | [SUMO](https://eclipse.dev/sumo/) 1.27, TraCI, sumolib |
-| Backend | Python 3.11, FastAPI, Uvicorn, WebSockets, Pydantic |
+| Backend | Python 3.11, FastAPI, Uvicorn, WebSockets, Pydantic, MCP server |
 | Database | PostgreSQL + PostGIS, SQLAlchemy, GeoAlchemy2 |
-| Maps & routing | OpenStreetMap, OSRM (routing), Overpass API (traffic-signal lookup), pyproj |
-| Frontend | React 19, Vite, Leaflet / React-Leaflet |
+| AI / ML | scikit-learn (gradient-boosted trees), joblib; LangGraph + Claude (Anthropic SDK) for the supervisor agent |
+| Maps & routing | OpenStreetMap, Nominatim (place search), OSRM, Overpass API, pyproj, rtree |
+| Live data & alerts | TomTom Traffic Flow + Routing API, Twilio Voice |
+| Frontend | React 19, Vite, Leaflet / React-Leaflet (2D map), MapLibre GL (3D chase view), Recharts (admin charts) |
 
 ---
 
@@ -95,12 +105,18 @@ simulations and checks that a refactor did not change their results.
 ├── backend/                     FastAPI application
 │   ├── main.py                  App entry point: CORS, table creation, routers
 │   ├── database.py              PostgreSQL connection (reads DATABASE_URL from .env)
-│   ├── models/                  Database tables: ambulance, hospital, traffic_signal, emergency
-│   ├── schemas/                 Request/response shapes (Pydantic)
-│   ├── api/routes/              HTTP + WebSocket endpoints
 │   ├── mcp_server.py            MCP tools for AI agents, served at /mcp
+│   ├── models/                  Database tables: ambulances, hospitals, traffic_signals,
+│   │                            emergencies, police_stations, police_calls,
+│   │                            ambulance_requests, route_optimization_logs, trip_events, grievances
+│   ├── schemas/                 Request/response shapes (Pydantic)
+│   ├── api/routes/              HTTP + WebSocket endpoints (simulation, planning, police, admin, …)
 │   └── services/
 │       ├── simulation_service.py  ★ Runs the live simulation loop for the dashboard
+│       ├── trip_recorder.py       Records each trip's events and driven track
+│       ├── admin_service.py       KPIs, delay reasons, problem junctions, grievances
+│       ├── police_station_service.py  Police stations and their contact numbers
+│       ├── police_notifier.py     Twilio voice calls to police stations
 │       ├── route_service.py       Road route from OSRM
 │       ├── junction_service.py    Finds junctions and traffic lights on a route
 │       ├── eta_service.py         Time-to-reach estimates for each signal
@@ -111,31 +127,41 @@ simulations and checks that a refactor did not change their results.
 │
 ├── corridor/                    ★ The corridor "brain" (no SUMO code; see "Architecture")
 │   ├── interfaces.py            The 3 connectors: AmbulanceTracker, TrafficSource, SignalController
-│   ├── engine.py                Finds signals ahead and turns the next one green
+│   ├── engine.py                Finds signals ahead and switches each one just in time
 │   ├── safety.py                Rules for early-green requests from AI agents
+│   ├── response.py              Deadlock response: police or re-route; stuck re-routing
 │   ├── police_watch.py          Police alerts for jams on stretches without signals
+│   ├── police_board.py          Live status of every police station
 │   └── feed.py                  Builds the live state for the dashboard
 │
-├── simulation/sumo/
-│   ├── adapters.py              SUMO versions of the 3 connectors (the only code using traci)
-│   ├── route_planner.py         Fastest ambulance route; stretches without signals + police cover
-├── simulation/live_traffic.py   Live TomTom traffic for the digital twin
-│   ├── sumo_bridge.py           SUMO start command, Pune speed limits, x/y → lat/lon
-│   └── pune_network_v2/         SUMO network and route files
-│       ├── pune_vtypes.add.xml                  ← Pune driving profile (speeds, gaps)
-│       ├── edge_type_weights.txt                ← traffic concentrates on main roads
-│       ├── ambulance_vtype.add.xml              ← the ambulance vehicle type
-│       ├── hospitals.json                       ← hospitals in the area (from OpenStreetMap)
-│       ├── scenarios/                           ← demo traffic + ambulance used by the dashboard
-│       └── expanded_network/
-│           ├── expanded.net.xml.gz              ← road network used by the demo
-│           └── ambulance_hospital.rou.xml       ← ambulance route used by the demo
+├── simulation/
+│   ├── live_traffic.py          Live TomTom traffic for the digital twin
+│   └── sumo/
+│       ├── adapters.py          SUMO versions of the connectors (the only code using traci):
+│       │                        tracker, signals, traffic, police responders, accidents, give-way
+│       ├── route_planner.py     Fastest ambulance route; stretches without signals + police cover
+│       ├── sumo_bridge.py       SUMO start command, Pune speed limits, x/y → lat/lon
+│       └── pune_network_v2/     SUMO network and route files
+│           ├── pune_vtypes.add.xml          ← Pune driving profile (speeds, gaps, reaction time)
+│           ├── edge_type_weights.txt        ← traffic concentrates on main roads
+│           ├── ambulance_vtype.add.xml      ← the ambulance vehicle type
+│           ├── hospitals.json               ← hospitals in the area (from OpenStreetMap)
+│           ├── police_stations.json         ← 11 police stations / chowkis (from OpenStreetMap)
+│           ├── scenarios/                   ← demo traffic + ambulance used by the dashboard
+│           └── expanded_network/
+│               ├── expanded.net.xml.gz      ← road network used by the demo
+│               └── ambulance_hospital.rou.xml   ← ambulance route of the demo trip
 │
 ├── frontend/                    React dashboard
 │   └── src/
-│       ├── App.jsx              Start/stop buttons, WebSocket connection, layout
-│       ├── MapView.jsx          Live Leaflet map
-│       └── components/          Header, ambulance card, corridor panel, signal panel, vehicle table
+│       ├── Root.jsx             Pages: live map (#/), admin (#/admin), trip page (#/admin/trip/<id>)
+│       ├── App.jsx              Live page: trip planner, start/stop, WebSocket, playback speed
+│       ├── MapView.jsx          Live 2D Leaflet map
+│       ├── ChaseView.jsx        3D view with the camera following the ambulance (MapLibre GL)
+│       ├── components/          Trip planner, live status cards (corridor, AI response, police,
+│       │                        live traffic, drivers making room, AI agent feed), moving markers
+│       └── admin/               Admin dashboard: KPIs, charts, route performance,
+│                                problem junctions, grievances, trip detail page
 │
 ├── agent/                       AI supervisor agent (LangGraph + Claude + MCP)
 │   ├── graph.py                 The observe → assess → think → wait loop
@@ -147,24 +173,33 @@ simulations and checks that a refactor did not change their results.
 ├── ai/                          AI layer (see "AI layer" below)
 │   ├── scenarios.py             Realistic traffic levels (light / normal / heavy)
 │   ├── features.py              What the ambulance "sees" each second (model inputs)
-│   ├── run_experiments.py       Runs hundreds of trips headless and records training data
-│   ├── train_eta.py             Trains the ETA models and compares them with the old formula
-│   ├── eta_model.py             Loads the trained models for the live dashboard
+│   ├── run_experiments.py / train_eta.py / eta_model.py        Arrival-time (ETA) models
+│   ├── clearance*.py / train_clearance.py                      When a signal must switch
+│   ├── pretrip*.py / train_pretrip.py                          Trip time before departure
+│   ├── deadlock*.py / train_deadlock.py / response_experiments.py   Deadlock prediction + response
 │   ├── compare_corridor.py      With vs without corridor results
-│   └── models/                  Trained models, scores (eta_metrics.json), chart (eta_report.png)
+│   └── models/                  Trained models (.joblib) and their scores (*_metrics.json)
 │
 ├── database/
-│   └── emergency_corridor_database.sql   PostGIS setup and checking queries
+│   ├── emergency_corridor_database.sql   PostGIS setup and checking queries
+│   └── admin_tables.sql                  Admin tables (created automatically; for reference)
 │
-├── scripts/                     One-off helper scripts used while building the demo
+├── scripts/
+│   ├── set_police_phones.py     Saves police_contacts.json numbers to the database
 │   ├── route_building/          Finding signals and hospital edges, generating the ambulance route
 │   ├── traffic_repair/          Fixing normal-traffic routes after the network was expanded
 │   ├── signal_inspection/       Inspecting SUMO traffic lights
-│   └── tests/                   Manual checks + regression_check.py (refactor safety net)
+│   └── tests/                   Checks: route, WebSocket, MCP, police call, admin data quality,
+│                                and regression_check.py (refactor safety net)
 │
+├── police_contacts.example.json Template for per-station TEST phone numbers
+├── see_police_stations.sql      Query to look at the police tables
 ├── requirements.txt             Python dependencies
 └── .env.example                 Template for your .env file
 ```
+
+`data/` (not tracked by git) holds the training data collected by the experiment scripts and the
+live-traffic cache.
 
 `_archive/` (not tracked by git) holds old files that are no longer used: the first Pune
 network, a backup of v2, logs and a zip backup. It can be deleted once you no longer need them.
@@ -237,6 +272,17 @@ simulated minutes (fast-forwarded, a few seconds of real time), then the ambulan
 Watch the route panel and the map as signals ahead switch to green. The simulation stops by
 itself shortly after the ambulance arrives, or click **Stop**.
 
+While it runs you can:
+
+- switch between the **2D map** and the **3D chase view** (camera behind the ambulance);
+- change the **playback speed** (1×, 2×, 5×, 10×) to watch the trip faster. The simulated
+  speeds do not change;
+- click **Simulate accident ahead** to test the police response (see
+  [Police for roads without signals](#police-for-roads-without-signals-phone-call-alerts)).
+
+The **admin dashboard** is at http://localhost:5173/#/admin (see
+[Admin dashboard](#admin-dashboard)).
+
 To run SUMO without its window, set `SUMO_GUI=0` in `.env` (needed on Apple Silicon Macs,
 where the SUMO window can hang).
 
@@ -253,13 +299,21 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/simulation/start` | Start the SUMO simulation (optional body: `start` and `hospital` points; default: demo trip) |
 | GET | `/plan/area` | The simulated area (trips must start and end inside it) |
 | GET | `/plan/hospitals` | Hospitals inside the area |
+| GET | `/plan/police` | Police stations inside the area |
 | GET | `/plan/search?q=` | Find places in the area (OpenStreetMap Nominatim) |
 | POST | `/plan/route` | Fastest ambulance route between a start point and a hospital |
 | POST | `/simulation/stop` | Stop the simulation |
 | POST | `/simulation/incident` | Demo: a crash blocks a road without signals ahead of the ambulance |
+| POST | `/simulation/playback-speed?speed=` | Watch faster: 1, 2, 5 or 10 simulated seconds per second |
 | GET | `/police-stations/` | Police stations with their contact numbers (partly hidden) |
+| GET | `/police-stations/{station_id}` | One police station |
 | PUT | `/police-stations/{station_id}/phone` | Save or remove a station's contact number |
 | GET | `/police-stations/calls` | Log of police alerts and phone calls |
+| GET | `/admin/kpis`, `/admin/delays`, `/admin/trend`, `/admin/route-performance` | Admin analytics (`?days=` for the last N days) |
+| GET / PATCH | `/admin/requests`, `/admin/requests/{request_id}` | Recorded trips; correct a trip's status, delay reason or notes |
+| GET | `/admin/junctions` | Problem junctions (where ambulances stood still longest) |
+| GET / POST / PATCH | `/admin/grievances…` | Grievance tickets and their summary |
+| GET | `/admin/options` | Allowed values for the admin filters and forms |
 | GET | `/simulation/state` | Latest simulation snapshot |
 | WS | `/simulation/ws` | Live simulation state, every 0.5 s |
 | POST | `/mcp` | MCP server for AI agents (see [AI layer](#ai-layer)) |
@@ -271,8 +325,10 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/emergencies/` | Start an emergency trip and save its route |
 | GET | `/corridors/{ambulance_id}` | Current corridor for an active emergency |
 
-The live dashboard uses the `/simulation/*` endpoints. The database and OSRM endpoints work
-alongside it but are not yet connected to the SUMO simulation.
+The live dashboard uses the `/simulation/*`, `/plan/*` and `/police-stations/*` endpoints; the
+admin dashboard uses `/admin/*`. The older `/ambulances`, `/hospitals`, `/traffic-signals`,
+`/routes`, `/emergencies` and `/corridors` endpoints (OSRM based) work alongside them but are
+not connected to the SUMO simulation.
 
 ---
 
@@ -285,6 +341,16 @@ root as modules so their imports and relative paths resolve:
 python -m scripts.tests.test_route
 python -m scripts.route_building.find_route_signals
 ```
+
+Checks in `scripts/tests/`:
+
+| Command | What it checks |
+|---|---|
+| `python -m scripts.tests.regression_check --save/--compare <file>` | Four fixed simulations give the same results after a refactor |
+| `python -m scripts.tests.test_admin_data_quality` | Admin KPIs: trips without an AI plan are not counted as on time |
+| `python -m scripts.tests.test_mcp` | MCP server end to end (backend must be running) |
+| `python -m scripts.tests.test_police_call` | One Twilio test call |
+| `python -m scripts.tests.test_simulation_websocket` | Live WebSocket feed (backend must be running) |
 
 ---
 
@@ -342,6 +408,11 @@ heavy traffic trips were 5% faster and the ambulance stood still 26% less; where
 sent they saved 126 s on average (up to 11 min in the worst deadlocks). Re-routing made every
 trip it was used on slower, so it is still compared and shown but not carried out
 (`ALLOW_REROUTE` in `corridor/response.py`).
+
+**Stuck re-routing:** when the ambulance has stood still for 40 s, or an accident blocks the road
+ahead, it takes a way round from its current road if the trip-time model says it saves at least
+30 s (at most 3 times per trip). In tests it made most trips slower; set `MAX_STUCK_REROUTES = 0`
+in `corridor/response.py` to switch it off.
 
 The decision, the police car and the jam appear on the map and in the "AI deadlock watch"
 card; the MCP tool `get_deadlock_watch` lets an AI agent read it. Rebuild with
@@ -425,6 +496,24 @@ at once: copy `police_contacts.example.json` to `police_contacts.json`, fill it 
   cleared after 141 s, ambulance reached the spot about 5 minutes later on a clear road.
   API: `POST /simulation/incident`.
 
+### Drivers giving way to the siren
+
+Drivers ahead of the ambulance, and of police cars on their way to a jam, make room as Indian
+law requires (Motor Vehicles Act, section 194E). `SumoGiveWay` in `simulation/sumo/adapters.py`
+looks at the vehicles in the siren vehicle's path within 100 m:
+
+| Driver | What they do |
+|---|---|
+| Moving, road with 2+ lanes | Change to another lane (if there is a gap) |
+| Stuck in a queue on a main road, not near the junction | Pull over to the roadside, rejoin once the siren has passed (60 s at most) |
+| Stuck inside a junction just ahead | Push on into any gap, keeping a safe distance |
+| Otherwise | Stay (no room; police clear such jams) |
+
+Only 75% of drivers react (always the same ones, so runs are repeatable), 2 s after first
+hearing the siren. Pulled-over cars are drawn pink at the kerb on the map and in the chase
+view, and the **Siren · drivers making room** card counts lane changes, pull-overs and drivers
+who did not react. `GIVE_WAY=0` in `.env` switches it off.
+
 ### MCP server (tools for AI agents)
 
 The backend also serves an MCP server at **`http://127.0.0.1:8000/mcp`** (streamable HTTP),
@@ -506,6 +595,7 @@ simulated vehicles calibrated to live traffic data. Signals and the ambulance ar
 |---|---|---|
 | Road speed limit | capped at 50 km/h | OSM import gave main roads 100 km/h |
 | Driver speed | ~55% of the limit on average (about 27 km/h), at most 75% (37.5 km/h) | Mixed traffic (two-wheelers, autos, pedestrians) |
+| Driver reaction time | 1.0 s (`tau`) | Not below the 1 s simulation step; at 0.9 s SUMO could not keep cars apart and reported thousands of collisions in heavy traffic |
 | Ambulance speed | cruises ~40 km/h (35–45 km/h), never above 45 km/h | With the siren it is faster than every normal car, so cars never overtake it; two-wheelers, autos, pedestrians and parked vehicles still keep it well below the limit |
 | Where traffic goes | weighted towards trunk / primary / secondary roads | Real traffic concentrates on arterials |
 | Re-routing | 50% of drivers re-route around jams | Navigation-app behaviour |
@@ -518,32 +608,68 @@ times match.
 
 ---
 
+## Admin dashboard
+
+Open http://localhost:5173/#/admin. It is for **oversight**: the corridor never waits for a
+person to approve anything; the admin watches, reviews and corrects afterwards.
+
+Every simulated trip is recorded automatically (`backend/services/trip_recorder.py`, saved once
+when the trip ends so the simulation never waits for the database):
+
+| Table | What it holds |
+|---|---|
+| `ambulance_requests` | One row per trip: start, hospital, status (`IN_PROGRESS / COMPLETED / CANCELLED / FAILED`), dispatch and arrival, response time, AI planned time and `plan_status`, delay and its reason |
+| `route_optimization_logs` | Signals cleared, police alerts and police on scene, re-routes, accidents, fast arrival |
+| `trip_events` | Stops, signals, police, accidents and re-routes in time order, plus the planned route and the driven track |
+| `grievances` | Complaint tickets from users, drivers, hospitals or police |
+
+What the dashboard shows:
+
+- **KPIs:** total trips, success rate, on-time rate, average response time and delay, open
+  grievances. Trips without an AI planned time are counted separately, never as "on time".
+- **Delay reasons** (`TRAFFIC`, `BAD_ROUTE`, `ACCIDENT`, set automatically; `VEHICLE_ISSUE`,
+  `DRIVER_DELAY`, `OTHER` set by an admin) and **requests / response time per day** (charts).
+- **Request log** with filters; an admin can correct a trip's delay reason, status or notes.
+- **Problem junctions:** where ambulances stood still longest.
+- **Trip page** (`#/admin/trip/<id>`): map with the planned route, the driven path and the
+  events, plus a timeline.
+- **Grievances:** create, filter, search, change status and priority, add a resolution note.
+
+Filter by period with the last N days. Trips left `IN_PROGRESS` by a stopped backend are marked
+`FAILED` at the next start-up.
+
+---
+
 ## Known limitations
 
 - **One ambulance at a time.** Any start and hospital inside the simulated area (about
-  5 × 4 km of central Pune, the outline highlighted on the map) can be chosen; the fastest route uses speed limits, not live
-  traffic.
-- **The ETA model was trained on the demo route only.** It works on other routes but is less
+  5 × 4 km of central Pune, the outline highlighted on the map) can be chosen; the fastest
+  route uses speed limits, not live traffic.
+- **The ETA model was trained mostly on the demo route.** It works on other routes but is less
   accurate there until it is retrained on many routes.
-- **Rule-based signal control.** Which signal goes green, and when, still follows fixed rules;
-  only the ETA is machine-learned so far.
-- **Signal timings are SUMO's defaults,** not measured Pune timings.
-- **Two halves not yet connected.** The database/OSRM features (nearest hospital, saved
-  emergencies) and the live SUMO simulation run independently.
-- **Public services.** Route endpoints depend on the public OSRM and Overpass servers. If those
-  are down, the endpoints return a `502` error.
-- **No authentication** on the API. It's intended for local demos only.
-- **Police cars get stuck in the jam they are sent to.** In the simulation a police car
-  reaching a jam from behind waits in the same queue (one test: 398 s instead of ~100 s).
-  Real officers would use the other lane or the footpath.
+- **Signal timings are SUMO's defaults,** not measured Pune timings. Some OpenStreetMap
+  signals were dropped when the network was built.
+- **Simulated traffic, not real cars.** Live TomTom data sets the speeds and traffic level, but
+  the individual vehicles, signals and the ambulance are simulated.
+- **Older database endpoints are separate.** `/ambulances`, `/hospitals/nearest`, `/routes`,
+  `/emergencies` and `/corridors` (OSRM based) are not connected to the SUMO simulation.
+- **Public services.** Place search and the older route endpoints depend on the public
+  Nominatim, OSRM and Overpass servers. If those are down, the endpoints return a `502` error.
+- **No authentication** on the API or the admin dashboard. It's intended for local demos only.
+- **Police cars can get stuck in the jam they are sent to.** Drivers give way to their siren
+  and officers stuck within 250 m park and walk, but a police car reaching a long jam from
+  behind can still lose minutes in the queue.
 - **Short jams are caught late.** In heavy traffic most jams on stretches without signals
   form and clear within seconds; the ones that last often form just ahead of the ambulance,
   so their alert is marked "police may arrive after the ambulance".
+- **Re-routing rarely helps.** Both the deadlock re-route and the stuck re-route made most
+  test trips slower (see [Deadlock response](#deadlock-response-re-route-or-send-police)).
 
 ## Roadmap
 
-- Human approval step for agent requests (LangGraph interrupts)
+- Admin: live system status panel and a log of every AI decision
 - Jam prediction and clearing queues ahead of the ambulance
 - Delay caused to other traffic in the with/without comparison
 - Fastest route using live (simulated or real) traffic
+- Retrain the ETA model on many routes
 - Multiple ambulances with priority handling

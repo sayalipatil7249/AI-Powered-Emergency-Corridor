@@ -7,6 +7,8 @@ traci. To run the corridor on real signals, write new classes with the
 same methods instead of changing the corridor code.
 """
 
+import zlib
+
 import traci
 from traci import constants as tc
 
@@ -594,6 +596,351 @@ class SumoResponder:
                 pass
         self._held_lanes.clear()
         self._waved.clear()
+
+
+# ---------------------------------------------------------
+# Drivers giving way to the siren
+# ---------------------------------------------------------
+
+# Drivers this far ahead of a siren, in its path, may make room (m).
+SIREN_RANGE_METERS = 100
+
+# Share of drivers who react to the siren (not everyone notices or
+# cares), and how long after first hearing it they act (s).
+GIVE_WAY_COMPLIANCE = 0.75
+GIVE_WAY_REACTION_SECONDS = 2
+
+# At most this many vehicles ahead are looked at per siren and step.
+_MAX_AHEAD = 20
+
+# Moving slower than this, a driver is stuck in a queue (m/s).
+_QUEUE_SPEED = 1.0
+
+# Roads wide enough to pull over to the side: main roads usually have
+# a shoulder or kerb space; narrow residential lanes do not. (Every car
+# lane in the network is 3.2 m wide and there are no sidewalks, so the
+# road type is the best sign of room at the roadside.)
+_PULL_OVER_ROAD_TYPES = ("trunk", "primary", "secondary", "tertiary")
+
+# No pulling over this close to the junction ahead: there is no room
+# at the stop line (m).
+_JUNCTION_CLEARANCE_METERS = 20
+
+# A driver who pulled over rejoins once the siren vehicle has passed,
+# and after this long at the latest (s, fail-safe).
+_PULL_OVER_SECONDS = 60
+
+# Drivers stuck inside a junction this close ahead of a siren push on
+# into any gap (ignoring right of way, keeping a safe distance), like
+# the police wave-through: a blocked junction box is what holds the
+# siren vehicle up even when its signal is green (m).
+_JUNCTION_BOX_METERS = 50
+
+
+class SumoGiveWay:
+    """
+    Drivers ahead of the ambulance (and of police cars on their way to
+    a jam) make room when they hear the siren, as the law requires in
+    India (Motor Vehicles Act, section 194E):
+
+        moving, road with 2+ lanes   change to another lane (if SUMO
+                                     finds a gap)
+        stuck in a queue on a main   pull over to the roadside (a short
+        road, not near the junction  parking stop off the lane), rejoin
+                                     once the siren vehicle has passed
+        stuck inside a junction      push on into any gap (ignoring right
+        just ahead                   of way, keeping a safe distance)
+        otherwise                    stay (no room: police clear jams)
+
+    Only GIVE_WAY_COMPLIANCE of drivers react (always the same ones, so
+    runs are repeatable), GIVE_WAY_REACTION_SECONDS after first hearing
+    the siren. Only vehicles directly in the siren vehicle's path (its
+    leaders, also on the next roads of its route) are asked; not
+    vehicles inside a junction, police cars or crashed vehicles.
+    """
+
+    def __init__(self):
+        self.pulled_over = {}   # vehicle id -> (siren id, since)
+        self._heard = {}        # vehicle id -> when it first heard a siren
+        self._changed = set()   # vehicles that changed lane for a siren
+        self._ignored = set()   # drivers who did not react
+        self._pushing = set()   # pushing out of a junction box
+        self.lane_changes = 0
+        self.pull_overs = 0
+        self.junction_pushes = 0
+
+    def step(self, ambulance_id, now):
+        """Once per simulation step: drivers ahead of the ambulance and
+        of every police car (siren on) make room. Returns how many
+        drivers made room this step."""
+        present = set(traci.vehicle.getIDList())
+        self._rejoin(present, now)
+        self._end_pushes(present)
+        sirens = [ambulance_id] + sorted(
+            vehicle_id for vehicle_id in present if vehicle_id.startswith("police")
+        )
+        made_room = 0
+        for siren_id in sirens:
+            if siren_id in present:
+                made_room += self._clear_path(siren_id, now)
+                made_room += self._clear_junction_box(siren_id)
+        return made_room
+
+    def status(self):
+        return {
+            "lane_changes": self.lane_changes,
+            "pull_overs": self.pull_overs,
+            "junction_pushes": self.junction_pushes,
+            "pulled_over_now": len(self.pulled_over),
+            "did_not_react": len(self._ignored),
+        }
+
+    def release_all(self):
+        """The trip ended: everyone still pulled over drives on, and
+        everyone pushing out of a junction drives normally again."""
+        present = set(traci.vehicle.getIDList())
+        for vehicle_id in list(self.pulled_over):
+            if vehicle_id in present:
+                self._drive_on(vehicle_id)
+        self.pulled_over.clear()
+        for vehicle_id in self._pushing & present:
+            try:
+                traci.vehicle.setSpeedMode(vehicle_id, _NORMAL_SPEED_MODE)
+            except traci.TraCIException:
+                pass
+        self._pushing.clear()
+
+    def _clear_junction_box(self, siren_id):
+        """Drivers standing still inside the junctions within
+        _JUNCTION_BOX_METERS ahead on the siren vehicle's route push on
+        into any gap."""
+        from simulation.sumo.route_planner import _net
+
+        try:
+            route = traci.vehicle.getRoute(siren_id)
+            index = traci.vehicle.getRouteIndex(siren_id)
+            road = traci.vehicle.getRoadID(siren_id)
+            position = traci.vehicle.getLanePosition(siren_id)
+        except traci.TraCIException:
+            return 0
+        if index < 0:
+            return 0
+        net = _net()
+
+        # Junctions ahead within range: the end of the current road, then
+        # the ends of the next roads while still in range.
+        nodes = []
+        distance = 0.0
+        for offset, road_id in enumerate(route[index:]):
+            try:
+                edge = net.getEdge(road_id)
+            except KeyError:
+                break
+            if offset == 0:
+                left = edge.getLength() - position if road == road_id else 0.0
+            else:
+                left = edge.getLength()
+            distance += max(left, 0.0)
+            if distance > _JUNCTION_BOX_METERS:
+                break
+            nodes.append(edge.getToNode())
+
+        pushed = 0
+        for node in nodes:
+            # The junction's inside: the "via" lanes of its connections
+            # (as SumoResponder.control_junctions finds them).
+            boxes = {
+                connection.getViaLaneID().rsplit("_", 1)[0]
+                for edge in node.getIncoming()
+                for connections in edge.getOutgoing().values()
+                for connection in connections
+                if connection.getViaLaneID()
+            }
+            for box in boxes:
+                try:
+                    vehicles = traci.edge.getLastStepVehicleIDs(box)
+                except traci.TraCIException:
+                    continue
+                for vehicle_id in vehicles:
+                    if (
+                        vehicle_id in self._pushing
+                        or vehicle_id.startswith(("police", "incident_", "ambulance"))
+                        or not self._reacts(vehicle_id)
+                    ):
+                        continue
+                    try:
+                        if traci.vehicle.getSpeed(vehicle_id) >= _QUEUE_SPEED:
+                            continue  # moving: not stuck
+                        traci.vehicle.setSpeedMode(vehicle_id, _WAVED_THROUGH_SPEED_MODE)
+                    except traci.TraCIException:
+                        continue
+                    self._pushing.add(vehicle_id)
+                    self.junction_pushes += 1
+                    pushed += 1
+        return pushed
+
+    def _end_pushes(self, present):
+        """Out of the junction: drive normally again."""
+        for vehicle_id in list(self._pushing):
+            if vehicle_id not in present:
+                self._pushing.discard(vehicle_id)
+                continue
+            try:
+                if traci.vehicle.getRoadID(vehicle_id).startswith(":"):
+                    continue
+                traci.vehicle.setSpeedMode(vehicle_id, _NORMAL_SPEED_MODE)
+            except traci.TraCIException:
+                pass
+            self._pushing.discard(vehicle_id)
+
+    @staticmethod
+    def _reacts(vehicle_id):
+        """The same drivers react every run (repeatable results)."""
+        return zlib.crc32(vehicle_id.encode()) % 100 < GIVE_WAY_COMPLIANCE * 100
+
+    def _clear_path(self, siren_id, now):
+        made_room = 0
+        current, covered = siren_id, 0.0
+        for _ in range(_MAX_AHEAD):
+            try:
+                leader = traci.vehicle.getLeader(current, SIREN_RANGE_METERS - covered)
+            except traci.TraCIException:
+                break
+            if not leader or not leader[0]:
+                break
+            vehicle_id, gap = leader
+            try:
+                covered += max(gap, 0.0) + traci.vehicle.getLength(vehicle_id)
+            except traci.TraCIException:
+                break
+            current = vehicle_id
+            if covered > SIREN_RANGE_METERS + 10:
+                break
+            if (
+                vehicle_id in self.pulled_over
+                or vehicle_id.startswith(("police", "incident_", "ambulance"))
+            ):
+                continue
+            if not self._reacts(vehicle_id):
+                self._ignored.add(vehicle_id)
+                continue
+            heard = self._heard.setdefault(vehicle_id, now)
+            if now - heard < GIVE_WAY_REACTION_SECONDS:
+                continue
+            if self._make_room(vehicle_id, siren_id, now):
+                made_room += 1
+        return made_room
+
+    def _make_room(self, vehicle_id, siren_id, now):
+        try:
+            lane_id = traci.vehicle.getLaneID(vehicle_id)
+            if not lane_id or lane_id.startswith(":"):
+                return False  # inside a junction: the police wave it through
+            road_id = traci.vehicle.getRoadID(vehicle_id)
+            lane_index = traci.vehicle.getLaneIndex(vehicle_id)
+            lanes = traci.edge.getLaneNumber(road_id)
+            speed = traci.vehicle.getSpeed(vehicle_id)
+        except traci.TraCIException:
+            return False
+
+        if speed < _QUEUE_SPEED and self._pull_over(
+            vehicle_id, road_id, lane_id, lane_index, speed, siren_id, now
+        ):
+            return True
+        if lanes > 1:
+            return self._change_lane(vehicle_id, road_id, lane_index, lanes)
+        return False
+
+    def _change_lane(self, vehicle_id, road_id, lane_index, lanes):
+        # Towards the roadside (lane 0), or away from it when already there.
+        target = lane_index - 1 if lane_index > 0 else lane_index + 1
+        if target >= lanes or not self._lane_allowed(f"{road_id}_{target}"):
+            return False
+        try:
+            traci.vehicle.changeLane(vehicle_id, target, 10.0)
+        except traci.TraCIException:
+            return False
+        if vehicle_id in self._changed:
+            return False  # asked before: not counted again
+        self._changed.add(vehicle_id)
+        self.lane_changes += 1
+        return True
+
+    def _pull_over(self, vehicle_id, road_id, lane_id, lane_index, speed, siren_id, now):
+        from simulation.sumo.route_planner import _net
+
+        try:
+            road_type = _net().getEdge(road_id).getType() or ""
+        except KeyError:
+            return False
+        if not any(f"highway.{kind}" in road_type for kind in _PULL_OVER_ROAD_TYPES):
+            return False  # narrow street: no room at the side
+        try:
+            position = traci.vehicle.getLanePosition(vehicle_id)
+            decel = traci.vehicle.getDecel(vehicle_id)
+            length = traci.lane.getLength(lane_id)
+        except traci.TraCIException:
+            return False
+        braking = speed * speed / (2 * decel) if decel > 0 else 0.0
+        stop_at = position + braking + 1.0
+        if stop_at > length - _JUNCTION_CLEARANCE_METERS:
+            return False  # at the junction: no room at the stop line
+        try:
+            traci.vehicle.setStop(
+                vehicle_id, road_id, pos=stop_at, laneIndex=lane_index,
+                duration=_PULL_OVER_SECONDS, flags=tc.STOP_PARKING,
+            )
+        except traci.TraCIException:
+            return False
+        self.pulled_over[vehicle_id] = (siren_id, now)
+        self.pull_overs += 1
+        return True
+
+    def _rejoin(self, present, now):
+        for vehicle_id, (siren_id, since) in list(self.pulled_over.items()):
+            if vehicle_id not in present:
+                del self.pulled_over[vehicle_id]  # left the simulation
+                continue
+            if now - since >= _PULL_OVER_SECONDS or self._passed(siren_id, vehicle_id, present):
+                self._drive_on(vehicle_id)
+                del self.pulled_over[vehicle_id]
+
+    def _passed(self, siren_id, vehicle_id, present):
+        """True once the siren vehicle is past the driver (or gone)."""
+        if siren_id not in present:
+            return True
+        try:
+            distance = traci.vehicle.getDrivingDistance(
+                siren_id,
+                traci.vehicle.getRoadID(vehicle_id),
+                traci.vehicle.getLanePosition(vehicle_id),
+            )
+        except traci.TraCIException:
+            return True
+        # Negative, or SUMO's "not on the route ahead" value: passed.
+        return distance < 0
+
+    def _drive_on(self, vehicle_id):
+        try:
+            if traci.vehicle.isStoppedParking(vehicle_id):
+                traci.vehicle.resume(vehicle_id)
+            elif traci.vehicle.getStops(vehicle_id, 1):
+                # Still on the way to its stop: cancel the stop.
+                traci.vehicle.replaceStop(vehicle_id, 0, "")
+            # else: the stop is already over.
+        except traci.TraCIException:
+            pass
+
+    @staticmethod
+    def _lane_allowed(lane_id):
+        try:
+            allowed = traci.lane.getAllowed(lane_id)
+            disallowed = traci.lane.getDisallowed(lane_id)
+        except traci.TraCIException:
+            return False
+        if allowed:
+            return "passenger" in allowed
+        return "passenger" not in disallowed
 
 
 # ---------------------------------------------------------

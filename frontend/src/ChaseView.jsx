@@ -7,6 +7,7 @@ import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 
 import { SIGNAL_STATUS, signalLabel } from "./routeStatus";
 import { SIGNAL_ICON } from "./icons";
+import { PULLED_OVER_COLOR, kerbPosition } from "./pulledOver";
 import { ROUTE_TRAFFIC_COLORS, carColor } from "./trafficColors";
 import {
   POLICE_ACTIVE_COLOR,
@@ -95,26 +96,29 @@ function vehiclesGeoJson(vehicles) {
         (vehicle) =>
           vehicle.latitude != null && !vehicle.vehicle_id?.startsWith("police")
       )
-      .map((vehicle) => ({
-        type: "Feature",
-        geometry: {
-          type: "Polygon",
-          coordinates: [
-            footprint(
-              vehicle.latitude,
-              vehicle.longitude,
-              vehicle.heading ?? 0,
-              CAR
-            ),
-          ],
-        },
-        properties: {
-          // Crashed cars (simulated accident) stand out in orange.
-          color: vehicle.vehicle_id?.startsWith("incident")
-            ? CRASHED_CAR_COLOR
-            : carColor(vehicle.speed ?? 0),
-        },
-      })),
+      .map((vehicle) => {
+        // Pulled over for the siren: drawn at the kerb, not on the lane.
+        const [latitude, longitude] = vehicle.pulled_over
+          ? kerbPosition(vehicle.latitude, vehicle.longitude, vehicle.heading)
+          : [vehicle.latitude, vehicle.longitude];
+        return {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              footprint(latitude, longitude, vehicle.heading ?? 0, CAR),
+            ],
+          },
+          properties: {
+            // Crashed cars (simulated accident) stand out in orange.
+            color: vehicle.vehicle_id?.startsWith("incident")
+              ? CRASHED_CAR_COLOR
+              : vehicle.pulled_over
+                ? PULLED_OVER_COLOR
+                : carColor(vehicle.speed ?? 0),
+          },
+        };
+      }),
   };
 }
 

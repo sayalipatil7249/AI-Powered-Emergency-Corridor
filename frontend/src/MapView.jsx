@@ -28,6 +28,7 @@ import {
   START_ICON,
 } from "./icons";
 import { SIGNAL_STATUS, formatDuration, signalLabel } from "./routeStatus";
+import { PULLED_OVER_COLOR, kerbPosition } from "./pulledOver";
 import { ROUTE_TRAFFIC_COLORS, carColor } from "./trafficColors";
 import {
   ACTIVE_ALERTS,
@@ -635,13 +636,20 @@ function MapView({
           vehicle.latitude == null || vehicle.longitude == null ? null : (
             <CircleMarker
               key={vehicle.vehicle_id}
-              center={[vehicle.latitude, vehicle.longitude]}
+              center={
+                // Pulled over for the siren: drawn at the kerb.
+                vehicle.pulled_over
+                  ? kerbPosition(vehicle.latitude, vehicle.longitude, vehicle.heading)
+                  : [vehicle.latitude, vehicle.longitude]
+              }
               radius={3.5}
               pathOptions={{
                 color: "#0b1120",
                 fillColor: vehicle.vehicle_id.startsWith("police")
                   ? "#3b82f6"
-                  : carColor(vehicle.speed),
+                  : vehicle.pulled_over
+                    ? PULLED_OVER_COLOR
+                    : carColor(vehicle.speed),
                 fillOpacity: 0.85,
                 weight: 1,
               }}
@@ -770,6 +778,7 @@ function MapView({
           <li className="legend-title">Cars</li>
           <li><span className="legend-swatch" style={{ background: carColor(10) }} />Moving</li>
           <li><span className="legend-swatch" style={{ background: carColor(0) }} />Stopped</li>
+          <li><span className="legend-swatch" style={{ background: PULLED_OVER_COLOR }} />Pulled over (siren)</li>
         </ul>
       </div>
     </div>
