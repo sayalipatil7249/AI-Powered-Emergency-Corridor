@@ -69,6 +69,8 @@
 
 /* Dark theme (the switch in the header; saved per browser). */
 :root[data-theme="dark"] {
+  /* Lets the browser draw open dropdown lists and scrollbars dark too. */
+  color-scheme: dark;
   --bg: #1a0d11;
   --surface: rgba(43, 22, 28, 0.88);
   --surface-raised: rgba(255, 236, 210, 0.06);
@@ -1633,6 +1635,14 @@ p {
 
 .condition-select:disabled {
   opacity: 0.55;
+}
+
+/* Open dropdown lists: readable in both themes (Windows draws them
+   itself, light grey, unless told otherwise). */
+select option,
+select optgroup {
+  background: var(--surface-solid);
+  color: var(--text);
 }
 
 .fleet {
