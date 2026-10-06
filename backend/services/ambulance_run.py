@@ -762,16 +762,19 @@ class AmbulanceRun:
         )
 
     def _police_here(self, snapshot):
-        """Police are working on the road the ambulance is stuck on (not
-        just somewhere else on its route)."""
+        """The police alert for the road the ambulance is stuck on (not
+        just somewhere else on its route), on scene first; or None."""
         road = snapshot.get("road_id")
+        found = None
         for alert in (self.police_watch.alerts.values() if self.police_watch else []):
             if alert["status"] not in ("ALERTED", "EN_ROUTE", "ON_SCENE"):
                 continue
             roads = set(alert.get("control_roads") or ()) | {alert.get("road_id")}
             if road is None or alert.get("road_id") is None or road in roads:
-                return True
-        return False
+                if alert["status"] == "ON_SCENE":
+                    return alert
+                found = found or alert
+        return found
 
     def summary(self):
         """This ambulance for the fleet list and the map."""
@@ -791,8 +794,12 @@ class AmbulanceRun:
                 )
             elif self._junction_blocked(snapshot, timing):
                 delay_reason = "junction blocked by stuck cars"
-            elif self._police_here(snapshot):
-                delay_reason = "police clearing a jam ahead"
+            elif police := self._police_here(snapshot):
+                # Only "clearing" once they are there; before, on the way.
+                delay_reason = (
+                    "police clearing a jam ahead" if police["status"] == "ON_SCENE"
+                    else f"stuck in a jam · police from {police.get('station') or 'the nearest station'} on the way"
+                )
             elif timing.get("stage") in ("yellow", "all_red"):
                 delay_reason = "signal changing"
             elif timing.get("queued_ahead_per_lane", 0) > 0:
