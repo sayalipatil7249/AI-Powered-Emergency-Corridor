@@ -308,13 +308,15 @@ function App() {
       setStarting(true);
       setNotice("");
 
-      // With a planned trip the ambulance takes that route;
+      // With a start and hospital chosen the ambulance takes that trip
+      // (the backend plans the route if Find route was not pressed);
       // otherwise the tested demo route.
+      const ownTrip = Boolean(tripStart && tripHospital);
       const response = await fetch(
         `${API_URL}/simulation/start?condition=${startCondition}`,
         {
           method: "POST",
-          ...(plan && tripStart
+          ...(ownTrip
             ? {
                 headers: { "Content-Type": "application/json" },
                 body: tripBody(startCondition),
@@ -323,11 +325,11 @@ function App() {
         }
       );
 
+      const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error("Failed to start simulation");
+        setNotice(result.detail || "Could not start the simulation.");
+        return;
       }
-
-      const result = await response.json();
 
       if (result.status === "stopping") {
         setNotice(
@@ -533,14 +535,15 @@ function App() {
   const liveTrip =
     !showPlan && (running || ambulance)
       ? selectedRun || simulationState?.trip : null;
-  // Without a planned route, Start runs the demo trip: name that one,
-  // not the hospital picked in the planner.
+  // Start runs the chosen trip (start and hospital picked, with or
+  // without Find route); with nothing chosen, the demo trip.
+  const tripChosen = Boolean(plan || (tripStart && tripHospital));
   const hospitalName =
-    liveTrip?.hospital_name || (plan && tripHospital?.name) || DEMO_HOSPITAL_NAME;
+    liveTrip?.hospital_name || (tripChosen && tripHospital?.name) || DEMO_HOSPITAL_NAME;
   // A start or hospital picked, but no route found yet.
   const planPending = !liveTrip && !plan && Boolean(tripStart);
   const startName =
-    liveTrip?.start_name || (plan && tripStart?.name) || "Shukrawar Peth";
+    liveTrip?.start_name || (tripChosen && tripStart?.name) || "Shukrawar Peth";
 
   const liveRoute = simulationState?.route || [];
   // Where the trip starts and ends, shown before and during the run.
@@ -582,6 +585,7 @@ function App() {
         hospitalName,
         ambulanceLabel: selectedRun?.label,
         planPending,
+        needsHospital: !tripHospital,
       });
   const previewPlan = showPlan && !showFleetPreview ? plan : null;
   const shownAmbulance = showPlan || showFleetPreview ? null : selectedSnapshot;

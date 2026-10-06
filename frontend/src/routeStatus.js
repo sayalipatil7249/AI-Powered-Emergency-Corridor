@@ -121,6 +121,7 @@ export function getStory({
   hospitalName = DEMO_HOSPITAL_NAME,
   ambulanceLabel = "The ambulance",
   planPending = false,
+  needsHospital = false,
 }) {
   const status = simulationState?.status;
   const ambulance = simulationState?.ambulance;
@@ -241,7 +242,9 @@ export function getStory({
   if (planPending) {
     return {
       tone: "muted",
-      text: "Press Find route. (Start without it runs the demo trip.)",
+      text: needsHospital
+        ? "Choose the hospital, then press Start."
+        : "Press Start (top right) to begin this trip, or Find route to see the route first.",
     };
   }
 
