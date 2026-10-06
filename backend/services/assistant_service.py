@@ -31,7 +31,7 @@ SYSTEM_PROMPT = """You answer questions about a live ambulance green-corridor si
 Each question comes with a JSON snapshot of the simulation right now. Answer from that snapshot only. If the snapshot does not contain the answer, say you can't see that.
 
 What the parts mean:
-- ambulances: one per ambulance. level_name is the patient's priority (Critical, Urgent, Stable). leg is the stage of the journey: to_patient (driving from the base), at_patient (picking up), to_hospital (patient on board). eta_seconds is the time left. delay_reason says why it is stopped. give_way means it is waiting at a junction for a higher-priority ambulance. next_signal is the next traffic signal on its route.
+- ambulances: one per ambulance. level_name is the patient's priority (Critical, Urgent, Stable). leg is the stage of the journey: to_patient (driving from the base), at_patient (picking up), to_hospital (patient on board); patient_on_board says the same as yes / no. eta_seconds and distance_left_meters are what is left to the hospital, not to the patient: while leg is to_patient they include the drive to the patient and the time loading them. The snapshot has no separate time or distance to the patient. delay_reason says why it is stopped. give_way means it is waiting at a junction for a higher-priority ambulance. next_signal is the next traffic signal on its route.
 - unit: the 108 ambulance sent (ALS = advanced life support, BLS = basic) and its station.
 - pre_alert: the hospital's answer to the 108 call centre's pre-alert (what the patient needs, e.g. cath lab, and whether it is ready). diverted_from: the hospital it was going to before being diverted.
 - stage (after arrival): "handover" (handing the patient to the hospital, handover_left_seconds to go), then "returning" (back in service, driving to its station) or "available".
@@ -74,6 +74,8 @@ def _ambulance(item):
         "unit", "pre_alert", "diverted_from", "stage", "handover_left_seconds",
     )
     result = {key: item.get(key) for key in keys if item.get(key) is not None}
+    if result.get("leg"):
+        result["patient_on_board"] = result["leg"] == "to_hospital"
     if item.get("routing_decision"):
         result["route_note"] = item["routing_decision"].get("explanation")
     if isinstance(result.get("speed"), (int, float)):
