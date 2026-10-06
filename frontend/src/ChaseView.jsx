@@ -48,6 +48,10 @@ const SIREN_COLORS = ["#ef4444", "#3b82f6"];
 const SIREN_FLASH_MS = 450;
 // A tall glowing pillar marks the hospital from far away.
 const HOSPITAL_BEACON = { length: 10, width: 10, height: 45 };
+// A shorter amber pillar marks the patient (108 trips with a pickup),
+// so it is clear why the ambulance stops there.
+const PATIENT_BEACON = { length: 4, width: 4, height: 16 };
+const PATIENT_COLOR = "#f59e0b";
 
 // Police: cars, station towers, accident beacons (metres).
 const POLICE_CAR = { length: 4.6, width: 1.9, height: 1.6 };
@@ -166,6 +170,29 @@ function hospitalGeoJson(point, name) {
         type: "Feature",
         geometry: { type: "Point", coordinates: [longitude, latitude] },
         properties: { label: name },
+      },
+    ],
+  };
+}
+
+function patientGeoJson(point) {
+  if (!point) return EMPTY;
+  const [latitude, longitude] = point;
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [square(latitude, longitude, PATIENT_BEACON)],
+        },
+        properties: { label: "Patient" },
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [longitude, latitude] },
+        properties: { label: "Patient" },
       },
     ],
   };
@@ -540,6 +567,19 @@ function addLayers(map) {
     },
   });
 
+  map.addSource("patient", { type: "geojson", data: EMPTY });
+  map.addLayer({
+    id: "patient-beacon",
+    type: "fill-extrusion",
+    source: "patient",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: {
+      "fill-extrusion-color": PATIENT_COLOR,
+      "fill-extrusion-height": PATIENT_BEACON.height,
+      "fill-extrusion-opacity": 0.75,
+    },
+  });
+
   // Glowing ring on the road so the ambulance is easy to spot.
   map.addSource("ambulance-point", { type: "geojson", data: EMPTY });
   map.addLayer({
@@ -715,6 +755,26 @@ function addLayers(map) {
     },
   });
 
+  map.addLayer({
+    id: "patient-label",
+    type: "symbol",
+    source: "patient",
+    filter: ["==", ["geometry-type"], "Point"],
+    layout: {
+      "text-field": ["get", "label"],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 14,
+      "text-offset": [0, -1.2],
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": "#92400e",
+      "text-halo-width": 3,
+    },
+  });
+
   // Labels: police stations, accidents, officers / cleared roads,
   // police cars.
   const label = (id, source, filter, color, halo, size, offset) => {
@@ -773,6 +833,7 @@ function ChaseView({
   routeTraffic = [],
   hospitalPoint,
   hospitalName,
+  pickupPoint,
   policeWatch,
   response,
   incidents = [],
@@ -867,6 +928,16 @@ function ChaseView({
         .setData(hospitalGeoJson(hospitalPoint, hospitalName));
     }
   }, [ready, hospitalPoint, hospitalName]);
+
+  // The patient, until the ambulance leaves with them.
+  const showPatient = pickupPoint && ambulance?.leg !== "to_hospital";
+  useEffect(() => {
+    if (ready) {
+      mapRef.current
+        .getSource("patient")
+        .setData(patientGeoJson(showPatient ? pickupPoint : null));
+    }
+  }, [ready, pickupPoint, showPatient]);
 
   useEffect(() => {
     if (ready) {

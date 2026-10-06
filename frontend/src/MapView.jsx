@@ -518,6 +518,7 @@ function MapView({
             routeTraffic={routeTraffic}
             hospitalPoint={hospital}
             hospitalName={hospitalName}
+            pickupPoint={pickupPoint}
             policeWatch={policeWatch}
             response={response}
             incidents={incidents}
