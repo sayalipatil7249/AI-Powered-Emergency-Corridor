@@ -31,14 +31,30 @@ PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 def clean_phone(number):
-    """"+91 98765-43210" -> "+919876543210"; raises ValueError if it is
-    not a phone number in international format."""
+    """The number in the form Twilio calls: "+91" and 10 digits for an
+    Indian mobile. Accepts "+91 98765-43210", "9876543210",
+    "09876543210" and "919876543210" (all -> "+919876543210"), or any
+    international number starting with "+". Raises ValueError otherwise.
+    (Same rules as frontend/src/phone.js.)"""
 
     cleaned = "".join(ch for ch in (number or "") if ch.isdigit() or ch == "+")
+    digits = cleaned.lstrip("+")
+    if not cleaned.startswith("+"):
+        if len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        if len(digits) == 10 and digits[0] in "6789":
+            cleaned = "+91" + digits
+    if cleaned.startswith("+91") and not re.fullmatch(r"\+91[6-9]\d{9}", cleaned):
+        raise ValueError(
+            "An Indian mobile number has 10 digits after +91, starting "
+            "with 6, 7, 8 or 9, e.g. +91 98765 43210."
+        )
     if not PHONE_PATTERN.match(cleaned):
         raise ValueError(
-            "Use the international format with the country code, "
-            "e.g. +919876543210."
+            "Type the mobile number as +91 followed by its 10 digits, "
+            "e.g. +91 98765 43210."
         )
     return cleaned
 

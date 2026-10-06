@@ -67,9 +67,12 @@ class SumoSimulation:
 class SumoAmbulanceTracker:
     def __init__(self, vehicle_id="ambulance_01"):
         self.vehicle_id = vehicle_id
+        # Top speed before advise_speed() slowed it down, or None.
+        self._normal_max_speed = None
 
-    def dispatch(self, route, depart_position=None, arrival_position=None):
-        """Add the ambulance to the simulation on this route, now."""
+    def dispatch(self, route, depart_position=None, arrival_position=None, stop=None):
+        """Add the ambulance to the simulation on this route, now (with a
+        planned stop, e.g. at the patient)."""
 
         route_id = f"{self.vehicle_id}_route"
         traci.route.add(route_id, list(route))
@@ -87,9 +90,43 @@ class SumoAmbulanceTracker:
                 else "max"
             ),
         )
+        # Like a real ambulance with its siren on: it does not wait for
+        # cars stuck inside a junction box (gridlock), but it still stops
+        # at red lights (so it can give way to another ambulance) and
+        # keeps a safe distance to the car in front.
+        traci.vehicle.setSpeedMode(self.vehicle_id, AMBULANCE_SPEED_MODE)
+        if stop:
+            self._plan_stop(stop)
+
+    def _plan_stop(self, stop):
+        road = stop["road"]
+        length = traci.lane.getLength(f"{road}_0")
+        position = min(max(stop["position"], 1.0), length - 1.0)
+        # The first lane an ambulance may stop on (some are footpaths).
+        for lane in range(traci.edge.getLaneNumber(road)):
+            try:
+                traci.vehicle.setStop(
+                    self.vehicle_id, road, pos=position, laneIndex=lane,
+                    duration=stop["seconds"],
+                )
+                return True
+            except traci.TraCIException:
+                continue
+        return False
+
+    def at_stop(self):
+        try:
+            return bool(traci.vehicle.isStopped(self.vehicle_id))
+        except traci.TraCIException:
+            return False
 
     def is_on_road(self):
         return self.vehicle_id in traci.vehicle.getIDList()
+
+    def has_arrived(self):
+        """True in the step it reached the end of its route. (Off the
+        road but not arrived: SUMO is teleporting it past a jam.)"""
+        return self.vehicle_id in traci.simulation.getArrivedIDList()
 
     def position(self):
         x, y = traci.vehicle.getPosition(self.vehicle_id)
@@ -105,6 +142,8 @@ class SumoAmbulanceTracker:
         return traci.vehicle.getAcceleration(self.vehicle_id)
 
     def max_speed(self):
+        if self._normal_max_speed is not None:
+            return self._normal_max_speed
         return traci.vehicle.getMaxSpeed(self.vehicle_id)
 
     def route(self):
@@ -135,6 +174,20 @@ class SumoAmbulanceTracker:
 
     def waiting_time(self):
         return traci.vehicle.getAccumulatedWaitingTime(self.vehicle_id)
+
+    def advise_speed(self, speed):
+        # The simulated crew follows the advice exactly: a lower top speed.
+        try:
+            if speed is None:
+                if self._normal_max_speed is not None:
+                    traci.vehicle.setMaxSpeed(self.vehicle_id, self._normal_max_speed)
+                self._normal_max_speed = None
+                return
+            if self._normal_max_speed is None:
+                self._normal_max_speed = traci.vehicle.getMaxSpeed(self.vehicle_id)
+            traci.vehicle.setMaxSpeed(self.vehicle_id, speed)
+        except traci.TraCIException:
+            self._normal_max_speed = None  # already left the simulation
 
 
 class SumoTrafficSource:
@@ -206,6 +259,7 @@ class SumoTrafficSource:
 
     def vehicles(self, exclude=""):
         ids = set(traci.vehicle.getIDList())
+        excluded = {exclude} if isinstance(exclude, str) else set(exclude)
 
         for vehicle_id in ids - self._subscribed:
             traci.vehicle.subscribe(vehicle_id, _VEHICLE_VARIABLES)
@@ -214,7 +268,7 @@ class SumoTrafficSource:
         results = traci.vehicle.getAllSubscriptionResults()
         vehicle_ids = [
             vehicle_id for vehicle_id in results
-            if vehicle_id != exclude and vehicle_id in ids
+            if vehicle_id not in excluded and vehicle_id in ids
         ]
         positions = [results[vehicle_id][tc.VAR_POSITION] for vehicle_id in vehicle_ids]
 
@@ -233,6 +287,40 @@ class SumoTrafficSource:
             )
         ]
 
+    def queue_front(self, vehicle_id):
+        try:
+            chain = [vehicle_id]
+            for _ in range(QUEUE_MAX_VEHICLES):
+                leader = traci.vehicle.getLeader(chain[-1], 60)
+                if (
+                    not leader or not leader[0] or leader[1] > QUEUE_GAP_METERS
+                    or traci.vehicle.getSpeed(leader[0]) > QUEUE_STOPPED_SPEED
+                ):
+                    break
+                chain.append(leader[0])
+            front = chain[-1]
+            route = traci.vehicle.getRoute(front)
+            index = traci.vehicle.getRouteIndex(front)
+            road = traci.vehicle.getRoadID(front)
+            if front == vehicle_id:
+                kind = "ambulance"
+            elif road.startswith(":"):
+                kind = "box"
+            else:
+                upcoming = traci.vehicle.getNextTLS(front)
+                kind = "signal" if upcoming and upcoming[0][2] < 20 else "junction"
+        except traci.TraCIException:
+            return None
+        if not 0 <= index < len(route):
+            return None
+        return {
+            "vehicle_id": front,
+            "road_id": route[index],
+            "next_road_id": route[index + 1] if index + 1 < len(route) else None,
+            "kind": kind,
+            "queue": len(chain) - 1,
+        }
+
     def to_latlon(self, x, y):
         return sumo_to_latlon(x, y)
 
@@ -248,6 +336,12 @@ class SumoTrafficSource:
     def set_road_speed_limit(self, road_id, speed):
         traci.edge.setMaxSpeed(road_id, speed)
 
+
+# Following a queue to its front: cars at most this far apart (m) and
+# slower than this (m/s) are one queue; at most this many cars.
+QUEUE_GAP_METERS = 15
+QUEUE_STOPPED_SPEED = 0.5
+QUEUE_MAX_VEHICLES = 80
 
 # Id of every signal's normal (fixed-time) program in the network.
 NORMAL_PROGRAM = "0"
@@ -376,6 +470,11 @@ class SumoSignalController:
         return sumo_to_latlon(average_x, average_y)
 
 
+# Ambulances: normal driving (31) plus bit 5 (32), "disregard right of
+# way within intersections": vehicles already inside a junction no longer
+# hold the ambulance up. Red lights and safe distances still apply.
+AMBULANCE_SPEED_MODE = 31 | 32
+
 # Speed modes (traci.vehicle.setSpeedMode): normal driving, and "waved
 # through by police": keep a safe distance but ignore right of way and
 # red lights at junctions.
@@ -384,6 +483,10 @@ _WAVED_THROUGH_SPEED_MODE = 7
 
 # Police holding traffic back: incoming lanes limited to this (m/s).
 _HELD_LANE_SPEED = 0.1
+
+# Officers wave on queued vehicles slower than this (m/s) on the roads
+# they control.
+_WAVE_QUEUE_SPEED = 0.5
 
 
 class SumoResponder:
@@ -397,6 +500,11 @@ class SumoResponder:
     _original_limits = {}
     _holders = {}
 
+    # Roads ambulances are on or still have to drive: police never hold
+    # these back, whichever ambulance they are working for (holding a side
+    # road for one ambulance must not block another one on it).
+    _ambulance_roads = set()
+
     def __init__(self):
         self._held_lanes = set()   # lanes this responder holds back
         self._waved = set()        # vehicles whose speed mode was changed
@@ -406,6 +514,12 @@ class SumoResponder:
         """New simulation: forget lanes held in the previous one."""
         cls._original_limits.clear()
         cls._holders.clear()
+        cls._ambulance_roads = set()
+
+    @classmethod
+    def protect_roads(cls, roads):
+        """The roads every ambulance is on or still has to drive."""
+        cls._ambulance_roads = set(roads)
 
     def find_route(self, from_road, to_road, vehicle_type="ambulance"):
         try:
@@ -418,6 +532,14 @@ class SumoResponder:
         if not stage.edges:
             return None
         return {"roads": list(stage.edges), "seconds": stage.travelTime}
+
+    def find_route_avoiding(self, from_road, to_road, blocked):
+        from simulation.sumo.route_planner import avoiding_roads
+
+        roads = avoiding_roads(from_road, to_road, blocked)
+        if not roads:
+            return None
+        return {"roads": roads, "seconds": self.route_seconds(roads)}
 
     def route_seconds(self, roads):
         return sum(traci.edge.getTraveltime(road) for road in roads)
@@ -480,9 +602,15 @@ class SumoResponder:
         from simulation.sumo.route_planner import _net
 
         net = _net()
-        keep = set(keep_roads)
+        keep = set(keep_roads) | SumoResponder._ambulance_roads
         roads_here = set(roads)
         waved = 0
+
+        # A road held back earlier that an ambulance now needs: let it go.
+        for lane_id in [
+            lane for lane in self._held_lanes if lane.rsplit("_", 1)[0] in keep
+        ]:
+            self._release_lane(lane_id)
 
         _police_clear_incidents(roads)
 
@@ -509,14 +637,23 @@ class SumoResponder:
                             roads_here.add(via.rsplit("_", 1)[0])
 
         for road in roads_here:
-            if not road.startswith(":"):
-                continue
             try:
                 vehicles = traci.edge.getLastStepVehicleIDs(road)
             except traci.TraCIException:
                 continue
+            if not road.startswith(":"):
+                # The queue on the roads the officers control: stopped
+                # vehicles are waved on through the junction (the other
+                # directions are held back above).
+                vehicles = [
+                    vehicle_id for vehicle_id in vehicles
+                    if traci.vehicle.getSpeed(vehicle_id) < _WAVE_QUEUE_SPEED
+                ]
             for vehicle_id in vehicles:
-                if vehicle_id in self._waved or vehicle_id.startswith("police"):
+                # Not police cars, and not ambulances: they already get
+                # green signals, and ignoring right of way causes crashes.
+                if (vehicle_id in self._waved or vehicle_id.startswith("police")
+                        or vehicle_id.startswith("ambulance")):
                     continue
                 try:
                     traci.vehicle.setSpeedMode(vehicle_id, _WAVED_THROUGH_SPEED_MODE)
@@ -533,20 +670,24 @@ class SumoResponder:
         SumoResponder._holders.setdefault(lane_id, set()).add(id(self))
         self._held_lanes.add(lane_id)
 
+    def _release_lane(self, lane_id):
+        self._held_lanes.discard(lane_id)
+        holders = SumoResponder._holders.get(lane_id, set())
+        holders.discard(id(self))
+        if holders:
+            return  # another responder still holds it
+        SumoResponder._holders.pop(lane_id, None)
+        speed = SumoResponder._original_limits.pop(lane_id, None)
+        if speed is None:
+            return
+        try:
+            traci.lane.setMaxSpeed(lane_id, speed)
+        except traci.TraCIException:
+            pass
+
     def release_junctions(self):
-        for lane_id in self._held_lanes:
-            holders = SumoResponder._holders.get(lane_id, set())
-            holders.discard(id(self))
-            if holders:
-                continue  # another responder still holds it
-            SumoResponder._holders.pop(lane_id, None)
-            speed = SumoResponder._original_limits.pop(lane_id, None)
-            if speed is None:
-                continue
-            try:
-                traci.lane.setMaxSpeed(lane_id, speed)
-            except traci.TraCIException:
-                pass
+        for lane_id in list(self._held_lanes):
+            self._release_lane(lane_id)
         present = set(traci.vehicle.getIDList())
         for vehicle_id in self._waved & present:
             try:

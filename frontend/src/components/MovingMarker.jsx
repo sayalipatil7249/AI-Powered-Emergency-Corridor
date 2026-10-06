@@ -45,6 +45,7 @@ function MovingMarker({
   icon,
   zIndexOffset,
   trailColor,
+  eventHandlers,
   children,
 }) {
   const markerRef = useRef(null);
@@ -122,6 +123,7 @@ function MovingMarker({
         position={startPosition || position}
         icon={icon}
         zIndexOffset={zIndexOffset}
+        eventHandlers={eventHandlers}
       >
         {children}
       </Marker>

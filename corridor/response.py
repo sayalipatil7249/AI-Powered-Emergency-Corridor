@@ -1,21 +1,20 @@
 """
-Deadlock response: when the AI predicts the ambulance will get stuck on
-the route ahead, re-route it or send traffic police, whichever gets it to
-the hospital sooner.
+Deadlock response: when the AI predicts a jam ahead, send traffic police.
+If a critical ambulance remains stopped, also reconsider a legal detour.
 
 Every CHECK_EVERY seconds the deadlock predictor (ai/deadlock.py) looks at
 the route ahead. If the ambulance is likely to stand still for a while:
-    re-route   fastest route to the hospital that avoids the jam; both
-               routes are judged with the AI trip-time model (junctions,
-               turns and signals slow a detour down, which live travel
-               times alone miss); saving = current route + predicted
-               standing time - new route
+    re-route   a legal route avoiding blocked roads ahead. The AI trip-time
+               model prices both routes so side-street detours are not
+               assumed to be faster merely because they are empty.
     police     the station whose car can reach the jam first; its saving
                = the predicted standing time it can prevent, if it
                arrives in time
-The larger saving wins. Police drive there with sirens; on arrival they
-stop traffic coming in from side roads and wave stuck cars through until
-the ambulance has passed.
+Normally police respond; earlier experiments found speculative rerouting
+slower. A critical crew that has already stood still for 45 seconds may
+divert only when an avoidable road is still ahead and the estimated saving
+is at least 90 seconds. Police drive there with sirens; on arrival they
+stop traffic coming in from side roads and wave stuck cars through.
 
 Uses only the connectors in corridor/interfaces.py; the predictor, the
 route-ahead features and road names are passed in.
@@ -45,12 +44,16 @@ MIN_POLICE_SAVING = 20
 MAX_CLEARING_SECONDS = 240    # police stay at most this long
 COOLDOWN_SECONDS = 60         # after one response, before the next
 MIN_SPEED_FOR_TIMING = 4.0    # m/s, for "when does the ambulance get there"
+RESCUE_STALL_SECONDS = 45     # observed continuous stop before a critical detour
+RESCUE_CHECK_EVERY = 15       # avoid searching the road network every tick
+RESCUE_POLICE_SCENE_GRACE = 90  # let officers clear a junction before diverting
 
 
 class DeadlockResponse:
     def __init__(self, ambulance, traffic, responder, stations,
                  route_ahead, predict, traffic_level, road_name=None,
-                 act=True, route_seconds=None, busy_roads=None):
+                 act=True, route_seconds=None, busy_roads=None,
+                 critical_can_reroute=None, police_alerts=None):
         """
         stations: [{"name", "latitude", "longitude", "road"}]
         route_ahead(route_info) -> (features, jam)   (ai/deadlock.py)
@@ -62,9 +65,13 @@ class DeadlockResponse:
              ai/response_experiments.py: same checks, no action)
         busy_roads() -> roads other police are already clearing
              (corridor/police_watch.py), so two cars are not sent there
+        critical_can_reroute() -> True for a critical crew not giving way
+        police_alerts() -> active signal-less-watch alerts for police timing
         """
 
         self.busy_roads = busy_roads or (lambda: set())
+        self.critical_can_reroute = critical_can_reroute or (lambda: False)
+        self.police_alerts = police_alerts or (lambda: ())
 
         self.act = act
         self.route_seconds = route_seconds or responder.route_seconds
@@ -88,6 +95,8 @@ class DeadlockResponse:
         self._last_check = -CHECK_EVERY
         self._cooldown_until = 0
         self._units = 0
+        self._stopped_since = None
+        self._last_rescue_check = -RESCUE_CHECK_EVERY
 
     # -------------------------------------------------------------
 
@@ -102,6 +111,21 @@ class DeadlockResponse:
 
         if self.route_info is None or not self.ambulance.is_on_road():
             return None
+
+        # At the patient: nothing to predict or rescue until it drives on.
+        if self.ambulance.at_stop():
+            self._stopped_since = None
+            return None
+
+        # Standing at the patient (a planned stop) is not being stuck.
+        if self.ambulance.speed() < 0.5 and not self.ambulance.at_stop():
+            if self._stopped_since is None:
+                self._stopped_since = now
+        else:
+            self._stopped_since = None
+
+        if self._check_critical_rescue(now):
+            return "rerouted"
 
         if self.status in ("police_en_route", "police_clearing"):
             self._follow_police(now)
@@ -150,18 +174,20 @@ class DeadlockResponse:
 
         self.jam = self._describe_jam(jam, jam_roads)
 
-        # Option 1: a new route around the jam.
+        # Option 1: a new route around the avoidable part of the jam.
+        # The current road cannot be skipped by setRoute().
         reroute_saving, new_route = 0.0, None
-        alternative = self.responder.find_route(current, route[-1])
-        if (
-            alternative
-            and alternative["roads"][0] == current
-            and not set(alternative["roads"]) & set(jam_roads)
-        ):
+        avoidable = set(jam_roads) - {current}
+        alternative = (self.responder.find_route_avoiding(
+            current, route[-1], avoidable
+        ) if avoidable else None)
+        if alternative and alternative["roads"] != route[index:]:
             now_seconds = self.route_seconds(route[index:])
             new_seconds = self.route_seconds(alternative["roads"])
             if now_seconds is not None and new_seconds is not None:
-                reroute_saving = now_seconds + seconds - new_seconds
+                # Predicted delay on the current edge is unavoidable.
+                future_delay = seconds if jam["start_index"] > index else 0
+                reroute_saving = now_seconds + future_delay - new_seconds
                 new_route = alternative["roads"]
 
         # Option 2: police from the station that gets there first.
@@ -207,9 +233,8 @@ class DeadlockResponse:
                 self.decision["choice"] = "reroute"
                 self._finish(now)
                 self._event(
-                    f"Deadlock predicted on {self.jam['name']} "
-                    f"({probability:.0%} likely, ~{seconds:.0f} s stuck). "
-                    f"Re-routed the ambulance around it: saves ~{reroute_saving:.0f} s."
+                    f"Likely jam on {self.jam['name']}. "
+                    f"Took a faster road (saves ~{reroute_saving:.0f} s)."
                 )
                 return "rerouted"
 
@@ -230,6 +255,7 @@ class DeadlockResponse:
                     "jam_end_index": jam["end_index"],
                     "sent_at": now,
                     "eta_seconds": round(eta),
+                    "initial_eta_seconds": round(eta),
                     "latitude": station["latitude"],
                     "longitude": station["longitude"],
                     "stage": "en_route",
@@ -241,10 +267,8 @@ class DeadlockResponse:
                     "stopped_after": None,
                 }
                 self._event(
-                    f"Deadlock predicted on {self.jam['name']} "
-                    f"({probability:.0%} likely, ~{seconds:.0f} s stuck). "
-                    f"Alert sent to {station['name']}: police arriving in "
-                    f"~{eta / 60:.0f} min to clear the traffic."
+                    f"Likely jam on {self.jam['name']}. "
+                    f"Called police from {station['name']} (about {max(1, round(eta / 60))} min)."
                 )
                 return None
 
@@ -252,11 +276,103 @@ class DeadlockResponse:
         self.status = "watching"
         self._cooldown_until = now + COOLDOWN_SECONDS
         self._event(
-            f"Jam ahead on {self.jam['name']} ({probability:.0%} likely), but "
-            "neither a new route nor police would get the ambulance there "
-            "sooner. Watching."
+            f"Likely jam on {self.jam['name']}. "
+            "No faster road, keeping watch."
         )
         return None
+
+    def _check_critical_rescue(self, now):
+        """Give a *stalled* critical crew a carefully priced way around a jam.
+
+        Normal trips retain the tested police-first policy. An observed stop
+        and a blocked future edge are both required; a detour cannot rescue
+        an ambulance trapped on its current edge.
+        """
+        if (
+            not self.act or not self.critical_can_reroute()
+            or self._stopped_since is None
+            or now - self._stopped_since < RESCUE_STALL_SECONDS
+            or now - self._last_rescue_check < RESCUE_CHECK_EVERY
+            or self.ambulance.road_id().startswith(":")
+        ):
+            return False
+        self._last_rescue_check = now
+        route = self.ambulance.route()
+        index = self.ambulance.route_index()
+        if index < 0 or index >= len(route):
+            return False
+        features, jam = self.route_ahead(self.route_info)
+        if not jam:
+            return False
+        blocked = set(route[max(index + 1, jam["start_index"]):jam["end_index"] + 1])
+        if not blocked:
+            return False
+        if (self.police and self.police["stage"] != "done"
+                and blocked.intersection(self.police["jam_roads"])):
+            if self.status == "police_clearing" and (
+                now - self.police["arrived_at"] < RESCUE_POLICE_SCENE_GRACE
+            ):
+                return False
+            if self.status == "police_en_route" and (
+                self.police["eta_seconds"] <= RESCUE_POLICE_SCENE_GRACE
+                and now - self.police["sent_at"]
+                < self.police["initial_eta_seconds"] + RESCUE_POLICE_SCENE_GRACE
+            ):
+                return False
+        for alert in self.police_alerts():
+            if alert.get("road_id") not in blocked:
+                continue
+            if alert["status"] == "ON_SCENE" and (
+                now - alert["on_scene_at"] < RESCUE_POLICE_SCENE_GRACE
+            ):
+                return False
+            if alert["status"] == "EN_ROUTE" and (
+                now - alert["alerted_at"]
+                < alert["police_eta_seconds"] + RESCUE_POLICE_SCENE_GRACE
+                and alert["police_eta_seconds"] - (now - alert["alerted_at"])
+                <= RESCUE_POLICE_SCENE_GRACE
+            ):
+                return False
+        alternative = self.responder.find_route_avoiding(
+            route[index], route[-1], blocked
+        )
+        if not alternative or alternative["roads"] == route[index:]:
+            return False
+        old_seconds = self.route_seconds(route[index:])
+        new_seconds = self.route_seconds(alternative["roads"])
+        if old_seconds is None or new_seconds is None:
+            return False
+        prediction = self.predict(features)
+        future_delay = (
+            min(180, max(0, prediction[1]))
+            if prediction and prediction[0] >= ALERT_PROBABILITY
+            and jam["start_index"] > index else 0
+        )
+        saving = old_seconds + future_delay - new_seconds
+        if saving < MIN_REROUTE_SAVING:
+            return False
+        if not self.responder.reroute_ambulance(self.ambulance.vehicle_id,
+                                                alternative["roads"]):
+            return False
+        if self.police and self.police["stage"] != "done":
+            self.responder.remove_unit(self.police["unit_id"])
+            self.responder.release_junctions()
+            self.police["stage"] = "done"
+        self.jam = self._describe_jam(
+            jam, route[jam["start_index"]:jam["end_index"] + 1]
+        )
+        self.decision = {
+            "time": now, "choice": "critical_rescue_reroute",
+            "reroute_saving_seconds": round(saving),
+            "observed_stall_seconds": round(now - self._stopped_since),
+        }
+        self._finish(now)
+        self._stopped_since = None
+        self._event(
+            f"Critical ambulance stuck near {self.jam['name']}. "
+            f"Took another road (saves ~{saving:.0f} s)."
+        )
+        return True
 
     def _follow_police(self, now):
         police = self.police
@@ -283,11 +399,7 @@ class DeadlockResponse:
             police["stopped_on_arrival"] = worst_stopped_share(
                 self.traffic, police["jam_roads"]
             )
-            self._event(
-                f"Police from {police['station']} arrived at "
-                f"{self.jam['name']} after {now - police['sent_at']:.0f} s "
-                "and are clearing the traffic."
-            )
+            self._event(f"Police clearing {self.jam['name']}.")
 
         route = self.ambulance.route()
         police["vehicles_waved"] += self.responder.control_junctions(
@@ -303,8 +415,7 @@ class DeadlockResponse:
             )
             police["on_scene_seconds"] = round(now - police["arrived_at"])
             self._event(
-                f"{'Ambulance through' if passed else 'Police stood down'}: "
-                f"{police['vehicles_waved']} vehicles waved through at "
+                f"{'Ambulance got past' if passed else 'Police left'} "
                 f"{self.jam['name']}."
             )
             self._finish(now)

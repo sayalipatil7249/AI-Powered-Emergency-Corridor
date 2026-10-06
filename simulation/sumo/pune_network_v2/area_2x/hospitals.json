@@ -1,0 +1,532 @@
+[
+ {
+  "name": "Amit Hospital",
+  "latitude": 18.546349,
+  "longitude": 73.888036
+ },
+ {
+  "name": "ASG Eye Hospital",
+  "latitude": 18.528932,
+  "longitude": 73.843635
+ },
+ {
+  "name": "Ashakiran Hospital",
+  "latitude": 18.515825,
+  "longitude": 73.847496
+ },
+ {
+  "name": "Asian Eye Hospital",
+  "latitude": 18.531519,
+  "longitude": 73.875817
+ },
+ {
+  "name": "B.J.Medical College and Sassoon Hospital",
+  "latitude": 18.526235,
+  "longitude": 73.871161
+ },
+ {
+  "name": "Bapat Hospital",
+  "latitude": 18.530365,
+  "longitude": 73.842063
+ },
+ {
+  "name": "Bora Hospital",
+  "latitude": 18.511463,
+  "longitude": 73.862547
+ },
+ {
+  "name": "Centre For Laproscopy Surgery",
+  "latitude": 18.520794,
+  "longitude": 73.84525
+ },
+ {
+  "name": "City Hospital",
+  "latitude": 18.519579,
+  "longitude": 73.880026
+ },
+ {
+  "name": "Dada Laser Eye Institute",
+  "latitude": 18.510938,
+  "longitude": 73.879904
+ },
+ {
+  "name": "Dalvi Hospital",
+  "latitude": 18.533067,
+  "longitude": 73.848776
+ },
+ {
+  "name": "Date Hospital",
+  "latitude": 18.51024,
+  "longitude": 73.852229
+ },
+ {
+  "name": "David Sassoon Hospital",
+  "latitude": 18.525279,
+  "longitude": 73.870499
+ },
+ {
+  "name": "Deccan Hardikar Hospital",
+  "latitude": 18.530287,
+  "longitude": 73.847544
+ },
+ {
+  "name": "Deendayal Memorial Hospital",
+  "latitude": 18.524976,
+  "longitude": 73.841126
+ },
+ {
+  "name": "Deodhar Eye Hospital",
+  "latitude": 18.511449,
+  "longitude": 73.836472
+ },
+ {
+  "name": "Dhanwantari Hospital",
+  "latitude": 18.519447,
+  "longitude": 73.8659
+ },
+ {
+  "name": "Dr. Karve Childrens Hospital",
+  "latitude": 18.52599,
+  "longitude": 73.85012
+ },
+ {
+  "name": "Dr. Rajendra Mehata Hospital",
+  "latitude": 18.537694,
+  "longitude": 73.85153
+ },
+ {
+  "name": "Dr. Rakhi K. Dutta",
+  "latitude": 18.535436,
+  "longitude": 73.887599
+ },
+ {
+  "name": "Dr. Todkar Hospital",
+  "latitude": 18.522952,
+  "longitude": 73.863947
+ },
+ {
+  "name": "Dr.Pawar Eye Hospital",
+  "latitude": 18.509272,
+  "longitude": 73.844926
+ },
+ {
+  "name": "Dr.Prakash Katariya Laser Cure",
+  "latitude": 18.522359,
+  "longitude": 73.844131
+ },
+ {
+  "name": "eshavari clinic",
+  "latitude": 18.526328,
+  "longitude": 73.851903
+ },
+ {
+  "name": "Galaxy Care Laparoscopy Institute Pvt. Ltd.",
+  "latitude": 18.511003,
+  "longitude": 73.837105
+ },
+ {
+  "name": "Ghaisas ENT Hospital",
+  "latitude": 18.51724,
+  "longitude": 73.842356
+ },
+ {
+  "name": "Godbole Hospital",
+  "latitude": 18.511208,
+  "longitude": 73.851315
+ },
+ {
+  "name": "Golwilkar Metropolis Heath Service (India) Pvt Ltd",
+  "latitude": 18.51813,
+  "longitude": 73.834416
+ },
+ {
+  "name": "Gupte Hospital Of Accurate Diagnostics Pvt Ltd",
+  "latitude": 18.519051,
+  "longitude": 73.839872
+ },
+ {
+  "name": "Healing Hands Clinic - Dhole Patil Road, Pune",
+  "latitude": 18.532643,
+  "longitude": 73.876885
+ },
+ {
+  "name": "Hope Hospital",
+  "latitude": 18.512691,
+  "longitude": 73.869516
+ },
+ {
+  "name": "Indira Maternity Home",
+  "latitude": 18.512219,
+  "longitude": 73.876296
+ },
+ {
+  "name": "Inlaks and Budhrani Hospital,Sadhu Vaswani Mission's Medical Complex",
+  "latitude": 18.534874,
+  "longitude": 73.887294
+ },
+ {
+  "name": "Jehangir Hospital",
+  "latitude": 18.530526,
+  "longitude": 73.876322
+ },
+ {
+  "name": "Joglekar Hospital",
+  "latitude": 18.532752,
+  "longitude": 73.833636
+ },
+ {
+  "name": "Joshi Hospital",
+  "latitude": 18.517143,
+  "longitude": 73.833287
+ },
+ {
+  "name": "Kalavati Mavale Hospital",
+  "latitude": 18.515042,
+  "longitude": 73.846413
+ },
+ {
+  "name": "Kamat Hospital",
+  "latitude": 18.512445,
+  "longitude": 73.869389
+ },
+ {
+  "name": "Kamla Nehru Hospital",
+  "latitude": 18.52289,
+  "longitude": 73.861994
+ },
+ {
+  "name": "Kataria Hospital",
+  "latitude": 18.545631,
+  "longitude": 73.886208
+ },
+ {
+  "name": "Kawediya Hospital",
+  "latitude": 18.524231,
+  "longitude": 73.86271
+ },
+ {
+  "name": "kedari Hospital",
+  "latitude": 18.515296,
+  "longitude": 73.875452
+ },
+ {
+  "name": "KEM Hospital",
+  "latitude": 18.52006,
+  "longitude": 73.866978
+ },
+ {
+  "name": "Kirad Hospital",
+  "latitude": 18.514348,
+  "longitude": 73.868913
+ },
+ {
+  "name": "Kumbhare Hospital",
+  "latitude": 18.521801,
+  "longitude": 73.862235
+ },
+ {
+  "name": "Manoj Clinic / Gore Hospital",
+  "latitude": 18.511779,
+  "longitude": 73.848787
+ },
+ {
+  "name": "Matru Seva Hospital;Pacharne Hospital",
+  "latitude": 18.516314,
+  "longitude": 73.871996
+ },
+ {
+  "name": "MJM Hospital",
+  "latitude": 18.524506,
+  "longitude": 73.843822
+ },
+ {
+  "name": "Modern Hospital",
+  "latitude": 18.515716,
+  "longitude": 73.868839
+ },
+ {
+  "name": "Morya General Hospital",
+  "latitude": 18.51479,
+  "longitude": 73.848434
+ },
+ {
+  "name": "N. M. Wadia Hospital",
+  "latitude": 18.530716,
+  "longitude": 73.876952
+ },
+ {
+  "name": "Naik Hospital, Pune",
+  "latitude": 18.510288,
+  "longitude": 73.859469
+ },
+ {
+  "name": "Navalmal Firodiya Super-Speciality Hospital",
+  "latitude": 18.51711,
+  "longitude": 73.833001
+ },
+ {
+  "name": "Naydu Rugnalay",
+  "latitude": 18.531299,
+  "longitude": 73.868958
+ },
+ {
+  "name": "Nityashraddha super speciality hospital",
+  "latitude": 18.527849,
+  "longitude": 73.87609
+ },
+ {
+  "name": "Nm Wadia Institute Of Cardiology",
+  "latitude": 18.530744,
+  "longitude": 73.877189
+ },
+ {
+  "name": "Om Prasuti Graha",
+  "latitude": 18.547084,
+  "longitude": 73.888524
+ },
+ {
+  "name": "ONP Leela Hospital",
+  "latitude": 18.532922,
+  "longitude": 73.846808
+ },
+ {
+  "name": "Oyster and Pearl Hospital Tulip",
+  "latitude": 18.531836,
+  "longitude": 73.847372
+ },
+ {
+  "name": "Panchsheel Hospital",
+  "latitude": 18.514077,
+  "longitude": 73.869246
+ },
+ {
+  "name": "Paranjape Hospital",
+  "latitude": 18.514398,
+  "longitude": 73.846052
+ },
+ {
+  "name": "Paranjpe Eye Clinic and Eye Surgery Centre",
+  "latitude": 18.518355,
+  "longitude": 73.8404
+ },
+ {
+  "name": "Paranjpe Hospital",
+  "latitude": 18.512019,
+  "longitude": 73.845765
+ },
+ {
+  "name": "Petals Hospital",
+  "latitude": 18.549297,
+  "longitude": 73.888843
+ },
+ {
+  "name": "Phadke Hospital",
+  "latitude": 18.518315,
+  "longitude": 73.843879
+ },
+ {
+  "name": "Poona Hospital and Research Centre",
+  "latitude": 18.510644,
+  "longitude": 73.842044
+ },
+ {
+  "name": "Poona Laser Center",
+  "latitude": 18.51237,
+  "longitude": 73.838175
+ },
+ {
+  "name": "Pramodini Urology Foundation",
+  "latitude": 18.519913,
+  "longitude": 73.841022
+ },
+ {
+  "name": "Prayag Hospital",
+  "latitude": 18.517484,
+  "longitude": 73.842789
+ },
+ {
+  "name": "Punarvasu Chikitsalaya",
+  "latitude": 18.528478,
+  "longitude": 73.842318
+ },
+ {
+  "name": "Pune City Eye Hospital",
+  "latitude": 18.529863,
+  "longitude": 73.876087
+ },
+ {
+  "name": "Pune Fertility Center",
+  "latitude": 18.528776,
+  "longitude": 73.847987
+ },
+ {
+  "name": "Pungliya Hospital",
+  "latitude": 18.52268,
+  "longitude": 73.850849
+ },
+ {
+  "name": "Rahel Hospital",
+  "latitude": 18.515291,
+  "longitude": 73.875455
+ },
+ {
+  "name": "Rajiv Gandhi Hospital",
+  "latitude": 18.545536,
+  "longitude": 73.883739
+ },
+ {
+  "name": "Ram Krishna Hospital, Pune",
+  "latitude": 18.509245,
+  "longitude": 73.848335
+ },
+ {
+  "name": "Red blood hospital",
+  "latitude": 18.527389,
+  "longitude": 73.871016
+ },
+ {
+  "name": "Ruby Hall Clinic",
+  "latitude": 18.532784,
+  "longitude": 73.877365
+ },
+ {
+  "name": "Sabane Hospital",
+  "latitude": 18.510703,
+  "longitude": 73.843434
+ },
+ {
+  "name": "Sadhu Vaswani Missions Medical Complex",
+  "latitude": 18.534772,
+  "longitude": 73.887444
+ },
+ {
+  "name": "Sahyadri Hospital",
+  "latitude": 18.513057,
+  "longitude": 73.839291
+ },
+ {
+  "name": "Sai Samarth Hospital",
+  "latitude": 18.523104,
+  "longitude": 73.868157
+ },
+ {
+  "name": "Samarth Hospital, Pune",
+  "latitude": 18.519523,
+  "longitude": 73.862059
+ },
+ {
+  "name": "Sancheti Hospital",
+  "latitude": 18.529852,
+  "longitude": 73.852837
+ },
+ {
+  "name": "Sanjeevan Hospital, Pune",
+  "latitude": 18.510235,
+  "longitude": 73.837062
+ },
+ {
+  "name": "Sant Dnyaneswar Medical Education Research Centre",
+  "latitude": 18.51378,
+  "longitude": 73.847697
+ },
+ {
+  "name": "Sasoon Hospital",
+  "latitude": 18.521872,
+  "longitude": 73.873118
+ },
+ {
+  "name": "Sassoon Hospital",
+  "latitude": 18.525143,
+  "longitude": 73.869566
+ },
+ {
+  "name": "Seth Tarachand Hospital",
+  "latitude": 18.517772,
+  "longitude": 73.864031
+ },
+ {
+  "name": "Shaishav Children's Hospital",
+  "latitude": 18.513793,
+  "longitude": 73.84762
+ },
+ {
+  "name": "Shintre Hospital",
+  "latitude": 18.51224,
+  "longitude": 73.849932
+ },
+ {
+  "name": "Shre Samarth Hospital",
+  "latitude": 18.51805,
+  "longitude": 73.865861
+ },
+ {
+  "name": "Shreeyash Hospital, Pune",
+  "latitude": 18.515567,
+  "longitude": 73.841867
+ },
+ {
+  "name": "Shri Samarth Hospital",
+  "latitude": 18.518062,
+  "longitude": 73.865867
+ },
+ {
+  "name": "Surya Sahyadri Hospital",
+  "latitude": 18.521259,
+  "longitude": 73.855677
+ },
+ {
+  "name": "Sutika Seva Mandir",
+  "latitude": 18.513913,
+  "longitude": 73.846551
+ },
+ {
+  "name": "Swanand Maternity Hospital",
+  "latitude": 18.529743,
+  "longitude": 73.833982
+ },
+ {
+  "name": "Talesara Hospital",
+  "latitude": 18.549872,
+  "longitude": 73.888771
+ },
+ {
+  "name": "Todkar Hospital",
+  "latitude": 18.510713,
+  "longitude": 73.866086
+ },
+ {
+  "name": "Umarji Hospital",
+  "latitude": 18.511935,
+  "longitude": 73.857758
+ },
+ {
+  "name": "Unique Hospital",
+  "latitude": 18.522164,
+  "longitude": 73.867678
+ },
+ {
+  "name": "Vishwaniranjan Eye Hospital",
+  "latitude": 18.511385,
+  "longitude": 73.845828
+ },
+ {
+  "name": "WEST VALLEY MULTISPECIALITY HOSPITAL PVT LTD",
+  "latitude": 18.535143,
+  "longitude": 73.876532
+ },
+ {
+  "name": "Yashda Hospital",
+  "latitude": 18.516808,
+  "longitude": 73.859535
+ },
+ {
+  "name": "Z Y - Vision",
+  "latitude": 18.524737,
+  "longitude": 73.840849
+ },
+ {
+  "name": "योगेश हॉस्पिटल",
+  "latitude": 18.510438,
+  "longitude": 73.847875
+ }
+]

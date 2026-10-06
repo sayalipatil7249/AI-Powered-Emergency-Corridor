@@ -1,3 +1,4 @@
+import ThemeToggle from "./ThemeToggle";
 import SvgIcon from "./SvgIcon";
 import { HOSPITAL_ICON } from "../icons";
 
@@ -6,11 +7,13 @@ function DashboardHeader({
   onStartSimulation,
   onStopSimulation,
   starting,
+  startDisabled = false,
   stopping,
   running,
   tripLabel,
   playbackSpeed,
   onPlaybackSpeedChange,
+  onReportProblem,
 }) {
   return (
     <header className="header">
@@ -28,15 +31,38 @@ function DashboardHeader({
           {connected ? "Live" : "Connecting"}
         </span>
 
+        <ThemeToggle />
+
+        {onReportProblem && (
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onReportProblem}
+            title="Complain about a delay, the route, a hospital, the police…"
+          >
+            Report a problem
+          </button>
+        )}
+
+        <a
+          className="button button-secondary"
+          href="#/admin"
+          target="_blank"
+          rel="noreferrer"
+          title="Admin: all ambulances, past trips and complaints"
+        >
+          Admin
+        </a>
+
         {/* How fast the simulation plays on screen (like fast-forward);
             the ambulance's simulated speed is not affected. */}
         <div
           className="playback"
           role="group"
-          aria-label="Playback speed"
-          title="Fast-forward the simulation. The ambulance's own speed is not affected."
+          aria-label="Speed"
+          title="Play the simulation faster. The ambulance itself does not drive faster."
         >
-          <span>Playback</span>
+          <span>Speed</span>
           {[1, 2, 5, 10].map((speed) => (
             <button
               key={speed}
@@ -45,7 +71,7 @@ function DashboardHeader({
               title={
                 speed === 1
                   ? "Real time"
-                  : `Fast-forward: ${speed} simulated seconds per real second`
+                  : `${speed} times faster`
               }
             >
               {speed}×
@@ -56,9 +82,9 @@ function DashboardHeader({
         <button
           className="button button-primary"
           onClick={onStartSimulation}
-          disabled={starting || running}
+          disabled={starting || running || startDisabled}
         >
-          {starting ? "Starting…" : "Start simulation"}
+          {starting ? "Starting…" : "Start"}
         </button>
 
         <button

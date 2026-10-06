@@ -1,8 +1,8 @@
 import { formatDuration } from "../routeStatus";
 
 const CHOICE_LABELS = {
-  police: "sent police",
-  reroute: "re-routed the ambulance",
+  police: "called police",
+  reroute: "changed the route",
   monitor: "kept watching",
 };
 
@@ -19,49 +19,40 @@ function ResponseCard({ response }) {
   if (status === "police_en_route" && police) {
     headline = (
       <>
-        <strong>Police on the way</strong> from {police.station} to{" "}
-        {jam?.name}: arriving in about {formatDuration(police.eta_seconds)}.
+        <strong>Police coming</strong> to {jam?.name}, in about{" "}
+        {formatDuration(police.eta_seconds)}.
       </>
     );
   } else if (status === "police_clearing" && police) {
     headline = (
       <>
-        <strong>Police clearing traffic</strong> at {jam?.name}:{" "}
-        {police.vehicles_waved} vehicles waved through so far.
+        <strong>Police clearing traffic</strong> at {jam?.name}.
       </>
     );
   } else if (risk && risk.probability >= 0.3) {
     headline = (
       <>
-        <strong>Traffic building up ahead</strong>: {Math.round(risk.probability * 100)}%
-        chance of getting stuck.
+        <strong>Traffic jam likely ahead</strong> ({Math.round(risk.probability * 100)}% chance).
       </>
     );
   } else {
     headline = (
       <>
-        <strong>Route ahead clear</strong>
-        {risk ? ` · ${Math.round(risk.probability * 100)}% chance of getting stuck` : ""}
+        <strong>Road ahead is clear</strong>
       </>
     );
   }
 
   return (
-    <section className="live-card response-card" aria-label="AI deadlock watch">
+    <section className="live-card response-card" aria-label="Jam warning">
       <div className="live-card-heading">
         <span className={`response-dot status-${status}`} />
-        AI deadlock watch
+        Jam warning
       </div>
       <p>{headline}</p>
       {decision && decision.choice && (
         <p className="muted">
-          Last decision: {CHOICE_LABELS[decision.choice]}
-          {decision.reroute_saving_seconds != null &&
-            ` · a new route was estimated at ~${formatDuration(
-              Math.abs(decision.reroute_saving_seconds)
-            )} ${decision.reroute_saving_seconds >= 0 ? "faster" : "slower"} (re-routing is off: it slowed trips in tests)`}
-          {decision.police_saving_seconds != null &&
-            ` · police would save ~${formatDuration(decision.police_saving_seconds)}`}
+          Last step: {CHOICE_LABELS[decision.choice]}
         </p>
       )}
     </section>

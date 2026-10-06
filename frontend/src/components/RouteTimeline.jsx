@@ -15,6 +15,15 @@ import {
 
 // Start, every signal on the route, and the hospital, top to bottom,
 // with the ambulance shown between the last passed and the next signal.
+// What each corridor role means (hover a role).
+const ROLE_HINTS = {
+  ACTIVE: "Next junction: it gives the ambulance the green",
+  PREPARING: "Told the ambulance is coming; ready to switch",
+  STANDBY: "On standby for the ambulance",
+  UPCOMING: "Further ahead on the route",
+  NORMAL: "Ambulance passed: back to its normal cycle",
+};
+
 function RouteTimeline({ routeStatuses, ambulance, hospitalName }) {
   const completed = ambulance?.status === "COMPLETED";
   const nextIndex = routeStatuses.findIndex(
@@ -45,7 +54,7 @@ function RouteTimeline({ routeStatuses, ambulance, hospitalName }) {
       <SvgIcon svg={START_ICON} className="timeline-marker" />
       <span className="timeline-label">Start</span>
       <span className="timeline-value muted">
-        {ambulance ? "Departed" : ""}
+        {ambulance ? "Left" : ""}
       </span>
     </li>
   );
@@ -73,14 +82,24 @@ function RouteTimeline({ routeStatuses, ambulance, hospitalName }) {
           )}
         </span>
         <span className="timeline-label" title={signalLabel(signal)}>
+          <span className="junction-code">J{signal.number}</span>
           <SvgIcon svg={SIGNAL_ICON} className="label-signal-icon" />
           {signalLabel(signal)}
         </span>
         <span className={`timeline-value status-text ${status.className}`}>
-          {status.label}
+          {signal.role && (
+            <span
+              className={`corridor-role role-${signal.role.toLowerCase()}`}
+              title={ROLE_HINTS[signal.role]}
+            >
+              {signal.role}
+              {signal.etaSeconds != null && ` · ${formatDuration(signal.etaSeconds)}`}
+            </span>
+          )}
+          {!signal.role && status.label}
           {isNext && signal.distanceMeters != null && (
             <small>
-              {formatDistance(signal.distanceMeters)} ahead
+              {status.label} · {formatDistance(signal.distanceMeters)} ahead
               {signal.status === "READY" && signal.switchInSeconds != null
                 ? ` · green in ${formatDuration(signal.switchInSeconds)}`
                 : ""}
@@ -116,7 +135,7 @@ function RouteTimeline({ routeStatuses, ambulance, hospitalName }) {
         <span className="muted">
           {routeStatuses.length > 0
             ? `${routeStatuses.length} signals`
-            : "Loads when the trip starts"}
+            : "Shows when the trip starts"}
         </span>
       </div>
 

@@ -15,8 +15,16 @@ early enough for officers to clear it before the ambulance arrives.
                (for CONFIRM_SECONDS)? Is the ambulance close enough that
                police must leave now? Then alert.
 
+    stalled    anywhere on the route (signal or not): when the ambulance
+               has been stopped most of the last 30 s, find the car at the
+               front of its queue and send police to the junction that car
+               is stuck at - often well past the start of a jammed stretch,
+               or at a green signal whose road beyond is full.
+
 Alert: ALERTED -> EN_ROUTE -> ON_SCENE -> PASSED, or CANCELLED when the
-jam clears by itself first (or the officers stand down).
+jam clears by itself first (or the officers stand down). Officers on
+scene hold traffic coming into their junctions from other roads and wave
+the stuck vehicles through.
 
 Uses only the connectors in corridor/interfaces.py.
 """
@@ -47,7 +55,12 @@ MIN_SPEED_FOR_TIMING = 4.0      # m/s, for "when does the ambulance get there"
 STAND_DOWN_SECONDS = 60         # jam gone this long -> cancel the alert
 REALERT_SECONDS = 120           # no new alert (phone call) for the same
                                 # stretch this soon after one was closed
-MAX_CLEARING_SECONDS = 240      # officers stay at most this long
+MAX_CLEARING_SECONDS = 240      # officers on scene stand down after
+                                # this long, but only while the ambulance
+                                # is still over ALERT_HORIZON_SECONDS
+                                # away: otherwise the jam returns just
+                                # before it arrives and the next unit is
+                                # too far to help
 
 # A reported accident (not just heavy traffic) is alerted at once: there
 # is no need to wait for the queue behind it to build up.
@@ -63,6 +76,22 @@ ACTIVE = ("ALERTED", "EN_ROUTE", "ON_SCENE")
 
 # Officers stuck in the queue this close to the jam park and walk.
 WALK_METERS = 250
+
+# The ambulance stopped at STALL_CHECKS of the last STALL_WINDOW checks
+# (every CHECK_EVERY s: 20 of the last 30 s, so creeping forward a few
+# metres does not reset it) sends police to whatever is holding the front
+# of its queue, signal or not.
+STALL_WINDOW = 6
+STALL_CHECKS = 4
+# A Critical patient: police are sent after 10 of the last 15 s stopped.
+URGENT_STALL_CHECKS = 2
+# Police with siren drive past queues: their time is the free-flow time
+# times this (not the live travel time of a gridlocked road).
+SIREN_FREE_FLOW_FACTOR = 1.3
+# A blockage this close to one police already work on is theirs (m).
+SAME_BLOCKAGE_METERS = 150
+# Stations tried for a blockage (nearest in a straight line first).
+BLOCKAGE_CANDIDATES = 3
 
 
 def _meters(lat1, lon1, lat2, lon2):
@@ -89,7 +118,7 @@ def worst_stopped_share(traffic, roads):
 class SignallessWatch:
     def __init__(self, ambulance, traffic, stretches, notify=None,
                  responder=None, trip_id="trip", busy_roads=None,
-                 road_name=None):
+                 road_name=None, stations=(), urgent=None):
         """
         stretches: from the route planner (indices into ambulance.route())
         notify(alert): called for every new alert and status change
@@ -98,6 +127,9 @@ class SignallessWatch:
         busy_roads(): roads other police are already clearing (the
             deadlock response), so two cars are not sent to one jam
         road_name(road_id): street name or None
+        stations: every police station [{"name", "latitude", "longitude",
+            "road"}], for blockages off the planned stretches
+        urgent(): True for a Critical patient (police sent sooner)
         """
 
         self.ambulance = ambulance
@@ -107,6 +139,10 @@ class SignallessWatch:
         self.trip_id = trip_id
         self.busy_roads = busy_roads or (lambda: set())
         self.road_name = road_name or (lambda road_id: None)
+        self.stations = list(stations)
+        self.urgent = urgent or (lambda: False)
+        self._stopped_checks = deque(maxlen=STALL_WINDOW)
+        self._blockages = 0
 
         self.stretches = [
             {
@@ -169,6 +205,18 @@ class SignallessWatch:
 
             distance = max(0.0, start - position)
 
+            # Officers hold the road until the ambulance is through; they
+            # only leave early when it is still far off (if the road jams
+            # again, a new alert brings police back in time).
+            if (
+                active
+                and active["status"] == "ON_SCENE"
+                and now - active["on_scene_at"] > MAX_CLEARING_SECONDS
+                and distance / speed > ALERT_HORIZON_SECONDS
+            ):
+                self._close(active, now, "CANCELLED", "the officers stood down")
+                continue
+
             # A reported accident on this stretch, ahead of the ambulance:
             # alert at once, however far ahead (police need the time).
             crash = next(
@@ -226,6 +274,156 @@ class SignallessWatch:
             if ambulance_eta <= max(ALERT_HORIZON_SECONDS, police_eta + CLEAR_SECONDS):
                 self._alert(stretch, worst_road, station, police_eta, roads,
                             now, ambulance_eta)
+
+        self._check_stall(now, here)
+
+    # -------------------------------------------------------------
+    # The ambulance is stuck: police to the front of its queue
+    # -------------------------------------------------------------
+
+    def _check_stall(self, now, here):
+        # Standing at the patient (a planned stop) is not being stuck.
+        self._stopped_checks.append(
+            self.ambulance.speed() <= 0.5 and not self.ambulance.at_stop()
+        )
+        if self.urgent():
+            stalled = sum(list(self._stopped_checks)[-3:]) >= URGENT_STALL_CHECKS
+        else:
+            stalled = sum(self._stopped_checks) >= STALL_CHECKS
+
+        # Blockages the ambulance got past, or that cleared by themselves.
+        for alert in list(self.alerts.values()):
+            if alert.get("kind") != "blockage" or alert["status"] not in ACTIVE:
+                continue
+            if here > alert["route_index"]:
+                self._close(alert, now, "PASSED", "the ambulance got through")
+            elif (
+                alert["status"] != "ON_SCENE"
+                and not stalled
+                and now - alert["alerted_at"] >= STAND_DOWN_SECONDS
+            ):
+                self._close(alert, now, "CANCELLED", "the traffic cleared by itself")
+
+        if not stalled:
+            return
+        self._dispatch_blockage(now, here)
+
+    def call_police(self, now, called_by="crew"):
+        """The crew (or the control room) calls police now: the station
+        that can reach the front of the queue fastest is sent, as when
+        the ambulance is found stuck. Returns {"called": bool, "message"}."""
+        here = self.ambulance.route_index()
+        if self.ambulance.road_id().startswith(":"):
+            here += 1
+        return self._dispatch_blockage(now, here, called_by=called_by)
+
+    def _dispatch_blockage(self, now, here, called_by=None):
+        """Send police to the front of the queue holding the ambulance up.
+        Returns {"called": bool, "message"} (why not, when not)."""
+
+        if not self.stations or not self.responder:
+            return {"called": False, "message": "No police stations in this area."}
+
+        front = self.traffic.queue_front(self.ambulance.vehicle_id)
+        if front is not None:
+            roads = [road for road in (front["road_id"], front["next_road_id"]) if road]
+        elif called_by:
+            # Called by people: the road ahead of the ambulance.
+            front = {"kind": "called", "queue": 0.0}
+            roads = self._roads[here:here + 2]
+        else:
+            return {"called": False, "message": "Nothing is holding the ambulance up."}
+        if not roads:
+            return {"called": False, "message": "No road ahead to send police to."}
+        x, y = self.traffic.lane_shape(f"{roads[0]}_0")[-1]
+        point = self.traffic.to_latlon(x, y)
+
+        # Police already on (or heading to) this blockage?
+        for alert in self.alerts.values():
+            if alert["status"] in ACTIVE and (
+                set(alert["control_roads"]) & set(roads)
+                or _meters(alert["latitude"], alert["longitude"],
+                           point["latitude"], point["longitude"]) <= SAME_BLOCKAGE_METERS
+            ):
+                return {
+                    "called": False,
+                    "message": f"Police from {alert['station']} are already on their way there.",
+                }
+        if set(roads) & self.busy_roads():
+            return {"called": False, "message": "Police are already working on that road."}
+
+        target = roads[0]
+        nearest = sorted(
+            self.stations,
+            key=lambda station: _meters(
+                station["latitude"], station["longitude"],
+                point["latitude"], point["longitude"],
+            ),
+        )[:BLOCKAGE_CANDIDATES]
+        best = None
+        for station in nearest:
+            trip = self.responder.find_route(station["road"], target, "police")
+            if trip is None:
+                continue
+            eta = DISPATCH_SECONDS + self._siren_seconds(trip["roads"])
+            if best is None or eta < best[1]:
+                best = (station, eta, trip["roads"])
+        if best is None:
+            return {"called": False, "message": "No police station can reach that road."}
+
+        station, police_eta, drive = best
+        try:
+            route_index = self._roads.index(target, here)
+        except ValueError:
+            route_index = here  # the front car is on another road
+        self._blockages += 1
+        road_name = self.road_name(target) or "the junction ahead"
+        why = {
+            "signal": "road beyond the signal is full",
+            "junction": "stuck at a junction",
+            "box": "car stuck inside the junction",
+            "ambulance": "ambulance waiting at the junction",
+        }.get(front["kind"], "traffic not moving")
+        if called_by:
+            why = f"called by the {called_by}"
+        self._alert(
+            {
+                "number": f"B{self._blockages}",
+                "name": road_name,
+                "stations": [station],
+                "stopped_share": front["queue"],
+                "speed_ratio": 0.0,
+                "geometry": self._roads_geometry(roads),
+            },
+            None, station, police_eta, drive, now,
+            ambulance_eta=0.0, cause="blockage",
+            control_roads=roads, road_id=target, route_index=route_index,
+            detail=why,
+        )
+        return {
+            "called": True,
+            "message": (
+                f"Called {station['name']}: police to {road_name}, "
+                f"about {max(1, round(police_eta / 60))} min."
+            ),
+        }
+
+    def _siren_seconds(self, roads):
+        """Police time along these roads with the siren on."""
+        seconds = sum(
+            self.traffic.lane_length(f"{road}_0")
+            / max(self.traffic.lane_speed_limit(f"{road}_0"), 1.0)
+            for road in roads
+        )
+        return seconds * SIREN_FREE_FLOW_FACTOR
+
+    def _roads_geometry(self, roads):
+        points = []
+        for road in roads:
+            for x, y in self.traffic.lane_shape(f"{road}_0"):
+                position = self.traffic.to_latlon(x, y)
+                points.append([position["latitude"], position["longitude"]])
+        return points
 
     # -------------------------------------------------------------
     # Measuring a stretch
@@ -308,16 +506,26 @@ class SignallessWatch:
     # -------------------------------------------------------------
 
     def _alert(self, stretch, worst_road, station, police_eta, roads, now,
-               ambulance_eta, cause="traffic"):
-        road = self._roads[worst_road]
+               ambulance_eta, cause="traffic", control_roads=None,
+               road_id=None, route_index=None, detail=None):
+        """control_roads: the roads whose junctions the officers control
+        (default: the stretch's); road_id: where the police drive to."""
+        road = road_id or self._roads[worst_road]
         x, y = self.traffic.lane_shape(f"{road}_0")[0]
         road_name = self.road_name(road) or stretch["name"]
+        if control_roads is None:
+            control_roads = self._roads[stretch["start_index"]:stretch["end_index"] + 1]
 
         alert = {
             "alert_id": f"{self.trip_id}-S{stretch['number']}-{int(now)}",
             "status": "ALERTED",
-            # "accident" (reported crash) or "traffic" (jam measured)
+            # "accident" (reported crash), "traffic" (jam measured on a
+            # stretch without signals) or "blockage" (the ambulance stuck)
             "cause": cause,
+            "kind": "blockage" if cause == "blockage" else "stretch",
+            "control_roads": list(control_roads),
+            "route_index": route_index,
+            "detail": detail,
             "station": station["name"],
             "stretch": stretch["number"],
             "road": road_name,
@@ -327,7 +535,7 @@ class SignallessWatch:
             "speed_ratio": stretch["speed_ratio"],
             "ambulance_eta_seconds": round(ambulance_eta),
             "police_eta_seconds": round(police_eta),
-            "late": police_eta + CLEAR_SECONDS > ambulance_eta,
+            "late": cause != "blockage" and police_eta + CLEAR_SECONDS > ambulance_eta,
             "alerted_at": now,
             "unit_id": None,
             "unit_latitude": None,
@@ -340,16 +548,17 @@ class SignallessWatch:
             "stopped_after": None,
         }
         self.alerts[stretch["number"]] = alert
-        self._event(
-            (
-                f"Accident reported on {road_name}. Alert sent at once to "
-                if cause == "accident"
-                else f"Heavy traffic on {road_name} (no signal there). Alert sent to "
+        if cause == "blockage":
+            self._event(
+                f"Ambulance stuck at {road_name}. "
+                f"Police from {station['name']} coming, about {max(1, round(police_eta / 60))} min."
             )
-            + f"{station['name']}: ambulance in ~{max(1, round(ambulance_eta / 60))} "
-            f"min, police can be there in ~{max(1, round(police_eta / 60))} min."
-            + (" Police may arrive after the ambulance." if alert["late"] else "")
-        )
+        else:
+            self._event(
+                f"{'Accident' if cause == 'accident' else 'Jam'} on {road_name}. "
+                f"Called police from {station['name']} (about {max(1, round(police_eta / 60))} min away)."
+                + (" Police may be late." if alert["late"] else "")
+            )
         self.notify(dict(alert))
 
         # In the simulation: a police car drives there with its siren on.
@@ -369,7 +578,7 @@ class SignallessWatch:
                 # queue and walk. Reaching the stretch, or getting within
                 # WALK_METERS of the jam, counts as arrived.
                 if state and not state.get("pending") and (
-                    state.get("road_id") in self._stretch_roads(alert["stretch"])
+                    state.get("road_id") in alert["control_roads"]
                     or _meters(state["latitude"], state["longitude"],
                                alert["latitude"], alert["longitude"]) <= WALK_METERS
                 ):
@@ -387,22 +596,15 @@ class SignallessWatch:
                 alert["status"] = "ON_SCENE"
                 alert["on_scene_at"] = now
                 alert["stopped_on_arrival"] = worst_stopped_share(
-                    self.traffic, self._stretch_roads(alert["stretch"])
+                    self.traffic, alert["control_roads"]
                 )
-                self._event(
-                    f"Police from {alert['station']} reached {alert['road']} "
-                    f"after {now - alert['alerted_at']:.0f} s and are clearing it."
-                )
+                self._event(f"Police clearing {alert['road']}.")
                 self.notify(dict(alert))
 
             if alert["status"] == "ON_SCENE":
-                stretch = self._stretch(alert["stretch"])
-                roads = self._roads[stretch["start_index"]:stretch["end_index"] + 1]
                 alert["vehicles_waved"] += self.responder.control_junctions(
-                    roads, self._roads
+                    alert["control_roads"], self._roads
                 )
-                if now - alert["on_scene_at"] > MAX_CLEARING_SECONDS:
-                    self._close(alert, now, "CANCELLED", "the officers stood down")
 
     def _close(self, alert, now, status, why):
         if alert["status"] == "EN_ROUTE" and self.responder:
@@ -413,7 +615,7 @@ class SignallessWatch:
         if alert.get("on_scene_at") is not None:
             # How the road looks now the officers are done.
             alert["stopped_after"] = worst_stopped_share(
-                self.traffic, self._stretch_roads(alert["stretch"])
+                self.traffic, alert["control_roads"]
             )
             alert["on_scene_seconds"] = round(now - alert["on_scene_at"])
 
@@ -423,29 +625,22 @@ class SignallessWatch:
         ):
             self.responder.release_junctions()
 
-        self._event(f"Alert for {alert['road']} closed: {why}.")
+        self._event(f"Police done at {alert['road']}: {why}.")
         self.notify(dict(alert))
 
-    def close(self, now):
-        """Trip over: every unit stands down."""
+    def close(self, now, status="PASSED", why="the ambulance reached the hospital"):
+        """Trip over (or a new route): every unit stands down."""
         for alert in list(self.alerts.values()):
             if alert["status"] in ACTIVE:
-                self._close(alert, now, "PASSED", "the ambulance reached the hospital")
+                self._close(alert, now, status, why)
 
     def active_roads(self):
         """Roads police from this watch are clearing or heading to."""
         roads = set()
         for alert in self.alerts.values():
             if alert["status"] in ACTIVE:
-                stretch = self._stretch(alert["stretch"])
-                roads.update(
-                    self._roads[stretch["start_index"]:stretch["end_index"] + 1]
-                )
+                roads.update(alert["control_roads"])
         return roads
-
-    def _stretch_roads(self, number):
-        stretch = self._stretch(number)
-        return self._roads[stretch["start_index"]:stretch["end_index"] + 1]
 
     def report_incident(self, road_id, now):
         """An accident was reported on this road: alert its police at the
@@ -488,9 +683,6 @@ class SignallessWatch:
                 return self._roads[index], stretch["name"], True
             farthest = (self._roads[index], stretch["name"], False)
         return farthest
-
-    def _stretch(self, number):
-        return next(s for s in self.stretches if s["number"] == number)
 
     def _event(self, message):
         logger.info(message)

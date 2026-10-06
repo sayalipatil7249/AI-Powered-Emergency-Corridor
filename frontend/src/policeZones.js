@@ -8,8 +8,6 @@ export const POLICE_CLEARED_COLOR = "#14b8a6";
 // Police alerts still being handled (corridor/police_watch.py).
 export const ACTIVE_ALERTS = ["ALERTED", "EN_ROUTE", "ON_SCENE"];
 
-const percent = (share) => `${Math.round(share * 100)}%`;
-
 // Every road police are managing or have cleared, from the police
 // alerts (roads without signals) and the AI deadlock response:
 // [{key, active, zone, station, road, vehicles_waved, unit_latitude,
@@ -38,17 +36,13 @@ export function policeZones(policeWatch, response) {
   return zones;
 }
 
-// "stopped cars 74% → 0% · 25 vehicles waved through · 2 min 44 s on scene"
+// "Cleared in 2 min 44 s · 25 vehicles moved on"
 export function zoneSummary(zone) {
-  const parts = [`${zone.vehicles_waved} vehicles waved through`];
-  if (zone.stopped_on_arrival != null && zone.stopped_after != null) {
-    parts.unshift(
-      `stopped cars ${percent(zone.stopped_on_arrival)} → ${percent(zone.stopped_after)}`
-    );
-  }
+  const parts = [];
   if (zone.on_scene_seconds != null) {
-    parts.push(`${formatDuration(zone.on_scene_seconds)} on scene`);
+    parts.push(`Cleared in ${formatDuration(zone.on_scene_seconds)}`);
   }
+  parts.push(`${zone.vehicles_waved} vehicles moved on`);
   return parts.join(" · ");
 }
 

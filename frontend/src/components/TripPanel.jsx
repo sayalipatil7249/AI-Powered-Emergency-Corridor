@@ -1,12 +1,15 @@
+import Collapsible from "./Collapsible";
 import RouteTimeline from "./RouteTimeline";
 import { formatDistance, formatDuration } from "../routeStatus";
 
 function TripPanel({
   ambulance,
+  ambulanceLabel,
   routeStatuses,
-  vehicleCount,
   hospitalName,
   planner,
+  fleet,
+  live,
 }) {
   const passedCount = routeStatuses.filter(
     (signal) => signal.status === "PASSED"
@@ -25,10 +28,12 @@ function TripPanel({
   return (
     <aside className="panel">
       {planner}
+      {fleet}
 
       <section className="panel-section eta">
         <span className="eta-label">
-          {arrived ? "Reached hospital in" : "Estimated arrival in"}
+          {ambulanceLabel && `${ambulanceLabel} · `}
+          {arrived ? "Reached hospital in" : "Arrives in"}
           {!arrived && ambulance?.eta_source === "ai" && (
             <span className="eta-badge">AI</span>
           )}
@@ -36,18 +41,11 @@ function TripPanel({
         <strong className="eta-value">{etaValue}</strong>
         <span className="eta-sub">
           {!arrived && ambulance?.trip_time_seconds != null
-            ? `On the road for ${formatDuration(ambulance.trip_time_seconds)}`
+            ? `Driving for ${formatDuration(ambulance.trip_time_seconds)}`
             : arrived
-              ? "Trip complete"
-              : "Waiting for the trip to start"}
+              ? "Trip done"
+              : "Not started yet"}
         </span>
-        {!arrived &&
-          ambulance?.eta_source === "ai" &&
-          ambulance.formula_eta_seconds != null && (
-            <span className="eta-compare">
-              Simple formula says {formatDuration(ambulance.formula_eta_seconds)}
-            </span>
-          )}
       </section>
 
       <section className="panel-section stats">
@@ -71,10 +69,6 @@ function TripPanel({
               : "--"}
           </strong>
         </div>
-        <div className="stat">
-          <span>Vehicles</span>
-          <strong>{vehicleCount}</strong>
-        </div>
       </section>
 
       <RouteTimeline
@@ -82,6 +76,17 @@ function TripPanel({
         ambulance={ambulance}
         hospitalName={hospitalName}
       />
+
+      {/* Traffic, jam prediction, police and AI messages: on demand. */}
+      {live && (
+        <Collapsible
+          title="Updates"
+          hint="traffic, police, messages"
+          className="panel-section"
+        >
+          {live}
+        </Collapsible>
+      )}
     </aside>
   );
 }

@@ -35,6 +35,10 @@ class AmbulanceTracker(Protocol):
     def is_on_road(self) -> bool:
         """True while the ambulance is driving (departed, not arrived)."""
 
+    def has_arrived(self) -> bool:
+        """True once it has reached the end of its route (off the road
+        for another reason, e.g. a GPS gap, is not arriving)."""
+
     def position(self) -> dict:
         """{"x", "y", "latitude", "longitude"} of the ambulance."""
 
