@@ -148,6 +148,25 @@ def inside_area(latitude, longitude):
 # once - and the API answers requests on several threads. One at a time.
 _SEARCH_LOCK = threading.Lock()
 
+# Roads offered around a point, nearest first.
+NEARBY_ROADS = 4
+
+
+@lru_cache(maxsize=1)
+def _reachable_roads():
+    """Ids of the roads an ambulance can reach from the rest of the city.
+    The OpenStreetMap data has a few pockets (e.g. campus or one-way
+    roads) it can drive out of but not into."""
+
+    net = _net()
+    roads = [
+        edge for edge in net.getEdges()
+        if edge.getFunction() != "internal" and edge.allows(VEHICLE_CLASS)
+    ]
+    # Start from a main road: most lanes, then fastest.
+    hub = max(roads, key=lambda edge: (edge.getLaneNumber(), edge.getSpeed()))
+    return {edge.getID() for edge in net.getReachable(hub, vclass=VEHICLE_CLASS)}
+
 
 def _nearby_roads(latitude, longitude):
     """Drivable roads near a point, nearest first:
@@ -173,9 +192,18 @@ def _nearby_roads(latitude, longitude):
         candidates.append((distance, edge, max(0.0, position)))
 
     candidates.sort(key=lambda item: item[0])
+    nearest = candidates[:NEARBY_ROADS]
+    reachable = _reachable_roads()
+    if not any(edge.getID() in reachable for _, edge, _ in nearest):
+        # None of the nearest roads can be reached from the city (a
+        # pocket): also offer the nearest that can, after them; the
+        # ambulance stops there when it has to drive here.
+        nearest += [
+            item for item in candidates[NEARBY_ROADS:] if item[1].getID() in reachable
+        ][:NEARBY_ROADS]
     return [
         (edge, position, distance)
-        for distance, edge, position in candidates[:4]
+        for distance, edge, position in nearest
     ]
 
 
@@ -351,6 +379,15 @@ def _street_names(edges, limit=4):
 
 
 def _best_path(starts, ends, fastest):
+    """The best path between the nearest roads; the extra roads
+    _nearby_roads offers around a pocket only when there is none."""
+    best = _search_paths(starts[:NEARBY_ROADS], ends[:NEARBY_ROADS], fastest)
+    if best is None and (len(starts) > NEARBY_ROADS or len(ends) > NEARBY_ROADS):
+        best = _search_paths(starts, ends, fastest)
+    return best
+
+
+def _search_paths(starts, ends, fastest):
     best = None
     for start_edge, start_position, start_distance in starts:
         for end_edge, end_position, end_distance in ends:
