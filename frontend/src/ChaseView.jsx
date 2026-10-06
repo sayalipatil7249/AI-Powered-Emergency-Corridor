@@ -49,9 +49,12 @@ const SIREN_FLASH_MS = 450;
 // A tall glowing pillar marks the hospital from far away.
 const HOSPITAL_BEACON = { length: 10, width: 10, height: 45 };
 // A shorter amber pillar marks the patient (108 trips with a pickup),
-// so it is clear why the ambulance stops there.
+// so it is clear why the ambulance stops there; grey once picked up.
 const PATIENT_BEACON = { length: 4, width: 4, height: 16 };
 const PATIENT_COLOR = "#f59e0b";
+const PATIENT_HALO = "#92400e";
+const PICKED_UP_COLOR = "#94a3b8";
+const PICKED_UP_HALO = "#334155";
 
 // Police: cars, station towers, accident beacons (metres).
 const POLICE_CAR = { length: 4.6, width: 1.9, height: 1.6 };
@@ -175,9 +178,12 @@ function hospitalGeoJson(point, name) {
   };
 }
 
-function patientGeoJson(point) {
+function patientGeoJson(point, pickedUp) {
   if (!point) return EMPTY;
   const [latitude, longitude] = point;
+  const properties = pickedUp
+    ? { label: "Patient picked up", color: PICKED_UP_COLOR, halo: PICKED_UP_HALO }
+    : { label: "Patient", color: PATIENT_COLOR, halo: PATIENT_HALO };
   return {
     type: "FeatureCollection",
     features: [
@@ -187,12 +193,12 @@ function patientGeoJson(point) {
           type: "Polygon",
           coordinates: [square(latitude, longitude, PATIENT_BEACON)],
         },
-        properties: { label: "Patient" },
+        properties,
       },
       {
         type: "Feature",
         geometry: { type: "Point", coordinates: [longitude, latitude] },
-        properties: { label: "Patient" },
+        properties,
       },
     ],
   };
@@ -574,7 +580,7 @@ function addLayers(map) {
     source: "patient",
     filter: ["==", ["geometry-type"], "Polygon"],
     paint: {
-      "fill-extrusion-color": PATIENT_COLOR,
+      "fill-extrusion-color": ["get", "color"],
       "fill-extrusion-height": PATIENT_BEACON.height,
       "fill-extrusion-opacity": 0.75,
     },
@@ -770,7 +776,7 @@ function addLayers(map) {
     },
     paint: {
       "text-color": "#ffffff",
-      "text-halo-color": "#92400e",
+      "text-halo-color": ["get", "halo"],
       "text-halo-width": 3,
     },
   });
@@ -929,15 +935,15 @@ function ChaseView({
     }
   }, [ready, hospitalPoint, hospitalName]);
 
-  // The patient, until the ambulance leaves with them.
-  const showPatient = pickupPoint && ambulance?.leg !== "to_hospital";
+  // The patient's pickup point, the whole trip (grey once on board).
+  const pickedUp = ambulance?.leg === "to_hospital";
   useEffect(() => {
     if (ready) {
       mapRef.current
         .getSource("patient")
-        .setData(patientGeoJson(showPatient ? pickupPoint : null));
+        .setData(patientGeoJson(pickupPoint, pickedUp));
     }
-  }, [ready, pickupPoint, showPatient]);
+  }, [ready, pickupPoint, pickedUp]);
 
   useEffect(() => {
     if (ready) {
