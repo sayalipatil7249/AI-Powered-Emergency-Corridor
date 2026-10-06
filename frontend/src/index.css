@@ -8,22 +8,52 @@
     "Segoe UI",
     sans-serif;
 
-  --bg: #0a0f1a;
-  --surface: #111827;
-  --surface-raised: #161f31;
-  --border: rgba(148, 163, 184, 0.14);
-  --text: #e6e9ef;
-  --muted: #8b95a7;
-  --accent: #60a5fa;
+  /* Light theme: neutral greys for everything normal; colour only
+     for status (red = critical / problem, amber = waiting, green =
+     cleared). */
+  --bg: #efe5d2;
+  --surface: rgba(251, 246, 236, 0.94);
+  --surface-raised: rgba(109, 26, 42, 0.06);
+  --border: rgba(109, 26, 42, 0.14);
+  --text: #2a1a1d;
+  --muted: #7a6660;
+  --accent: #6d1a2a;
 
   /* Signal status colours */
-  --green: #22c55e;
-  --turning: #84cc16;
-  --ready: #f59e0b;
-  --waiting: #475569;
-  --passed: #1f2a3c;
+  --green: #16a34a;
+  --turning: #65a30d;
+  --ready: #ea7a1a;
+  --waiting: #b8a99a;
+  --passed: #e6dac4;
 
   --red: #dc2626;
+
+  /* Text in status colours, map and floating panels */
+  --text-red: #b91c1c;
+  --text-amber: #c2410c;
+  --text-green: #15803d;
+  --text-blue: #1d4ed8;
+  --text-teal: #0f766e;
+  --overlay: rgba(251, 246, 236, 0.92);
+
+  /* Soft glass: page glow, frosted cards, brand */
+  --page-bg: radial-gradient(1000px 600px at -5% -10%, rgba(200, 169, 74, 0.22), transparent 60%),
+    radial-gradient(900px 700px at 105% 110%, rgba(109, 26, 42, 0.12), transparent 60%),
+    #efe5d2;
+  --glass: blur(10px);
+  --shadow-soft: 0 1px 2px rgba(109, 26, 42, 0.06), 0 10px 28px rgba(109, 26, 42, 0.09);
+  --brand: #6d1a2a;
+  --brand-grad: #6d1a2a;
+  --brand-glow: 0 6px 18px rgba(109, 26, 42, 0.28);
+  --input-bg: #fffdf8;
+  --heading-font: Inter, ui-sans-serif, system-ui, sans-serif;
+  --map-bg: #efe5d2;
+  --tile-filter: sepia(0.35) saturate(0.75) contrast(0.95) brightness(1.02);
+  --passed-dot: #d8c9ad;
+  --primary-hover: #5a1422;
+  --on-accent: #ffffff;
+  --danger-bg: #fdecec;
+  --danger-bg-hover: #fbdcdc;
 
   color: var(--text);
   background: var(--bg);
@@ -31,6 +61,54 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  --mustard: #c8a94a;
+  --mustard-soft: rgba(200, 169, 74, 0.25);
+  --cream: #f6ecd9;
+  --surface-solid: #fffaf1;
+}
+
+/* Dark theme (the switch in the header; saved per browser). */
+:root[data-theme="dark"] {
+  --bg: #1a0d11;
+  --surface: rgba(43, 22, 28, 0.88);
+  --surface-raised: rgba(255, 236, 210, 0.06);
+  --border: rgba(255, 228, 196, 0.10);
+  --text: #f3e9da;
+  --muted: #b5a196;
+  --accent: #e2c46a;
+
+  --green: #22c55e;
+  --turning: #84cc16;
+  --ready: #f59e0b;
+  --waiting: #5c4a46;
+  --passed: #2e1b20;
+
+  --text-red: #fca5a5;
+  --text-amber: #fdba74;
+  --text-green: #86efac;
+  --text-blue: #93c5fd;
+  --text-teal: #2dd4bf;
+  --overlay: rgba(38, 18, 24, 0.9);
+  --page-bg: radial-gradient(1000px 600px at -5% -10%, rgba(200, 169, 74, 0.10), transparent 60%),
+    radial-gradient(900px 700px at 105% 110%, rgba(155, 42, 62, 0.22), transparent 60%),
+    #1a0d11;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.4);
+  --brand-glow: 0 6px 20px rgba(155, 42, 62, 0.35);
+  --input-bg: rgba(0, 0, 0, 0.25);
+  --surface-solid: #2b161c;
+  --map-bg: #1f1216;
+  --tile-filter: invert(1) hue-rotate(180deg) brightness(0.78) contrast(0.9) sepia(0.4) saturate(0.45);
+  --passed-dot: #4a3236;
+  --primary-hover: #9b2a3e;
+  --on-accent: #2a1a1d;
+  --danger-bg: rgba(127, 29, 29, 0.85);
+  --danger-bg-hover: rgba(185, 28, 28, 0.95);
+  --brand-grad: #7a1f30;
+}
+
+.theme-toggle {
+  min-width: 38px;
+  padding: 8px 10px;
 }
 
 * {
@@ -181,7 +259,7 @@ p {
 }
 
 .button-primary:not(:disabled):hover {
-  background: #ffffff;
+  background: var(--primary-hover);
 }
 
 .button-secondary {
@@ -208,19 +286,17 @@ p {
 .map.leaflet-container {
   height: 100%;
   width: 100%;
-  /* Dark while tiles load, instead of Leaflet's light grey */
-  background: #1b1f27;
+  background: var(--map-bg);
 }
 
 
-/* Dark map: invert OpenStreetMap's colours and mute them */
+/* Light map: OpenStreetMap, muted so the route and markers stand out */
 .map .leaflet-tile-pane {
-  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9)
-    saturate(0.25);
+  filter: var(--tile-filter);
 }
 
 .map .leaflet-control-attribution {
-  background: rgba(10, 15, 26, 0.75);
+  background: var(--overlay);
   color: var(--muted);
   font-size: 10px;
 }
@@ -237,7 +313,7 @@ p {
   padding: 5px 9px;
   font-size: 12px;
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
 }
 
 .map .leaflet-tooltip-top::before {
@@ -271,7 +347,7 @@ p {
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(17, 24, 39, 0.88);
+  background: var(--overlay);
   backdrop-filter: blur(8px);
   font-size: 12.5px;
   font-weight: 600;
@@ -286,7 +362,8 @@ p {
 .map-legend {
   left: 14px;
   bottom: 14px;
-  max-width: calc(100% - 28px);
+  /* Stay clear of the right-side column (.map-side). */
+  max-width: calc(100% - 358px);
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -295,7 +372,7 @@ p {
   list-style: none;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(17, 24, 39, 0.88);
+  background: var(--overlay);
   backdrop-filter: blur(8px);
   font-size: 11.5px;
   color: var(--muted);
@@ -341,7 +418,7 @@ p {
 }
 
 .legend-swatch.status-passed {
-  background: #334155;
+  background: var(--passed-dot);
 }
 
 /* Status sentence floating on the map */
@@ -354,9 +431,9 @@ p {
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(17, 24, 39, 0.9);
+  background: var(--overlay);
   backdrop-filter: blur(8px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 .story p {
@@ -368,7 +445,7 @@ p {
 .story small {
   display: block;
   margin-top: 4px;
-  color: #fcd34d;
+  color: var(--text-amber);
   font-size: 12.5px;
 }
 
@@ -411,13 +488,13 @@ p {
   background: var(--red);
   border: 2px solid #ffffff;
   box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.25),
-    0 4px 12px rgba(0, 0, 0, 0.45);
+    0 4px 12px rgba(15, 23, 42, 0.18);
 }
 
 .map-place {
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+  filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.22));
 }
 
 .map-ambulance svg,
@@ -431,13 +508,13 @@ p {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  border: 2px solid #0a0f1a;
+  border: 2px solid #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 11px;
   font-weight: 800;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
 }
 
 .map-signal svg {
@@ -507,7 +584,7 @@ p {
 
 .status-waiting {
   background: var(--waiting);
-  color: #e2e8f0;
+  color: #ffffff;
 }
 
 .status-passed {
@@ -517,44 +594,26 @@ p {
 
 /* ================= Side panel ================= */
 
-/* Top to bottom: plan a trip, live status, route, trip metrics. The
-   panel scrolls as one column; the metrics stay pinned to its bottom. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  /* The planner, trip summary and ambulance list can be taller than the
+     window: the whole side panel scrolls. */
   overflow-y: auto;
-  scrollbar-width: thin;
+  padding-right: 2px;
 }
 
-.trip-metrics {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: auto;
-  background: var(--bg);
-  /* Hide what scrolls underneath in the gap above the metrics. */
-  box-shadow: 0 -12px 0 var(--bg);
+/* Each section keeps its full height instead of being squeezed. */
+.panel > * {
+  flex-shrink: 0;
 }
 
-/* Live traffic, AI deadlock watch, police and AI agent cards */
-.live-status {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.live-status .section-heading {
-  margin-bottom: 0;
-}
-
-.live-status-empty {
-  font-size: 12.5px;
-  line-height: 1.45;
+/* The route timeline fills any space left, with a sensible minimum. */
+.panel > .timeline-section {
+  flex: 1 0 auto;
+  min-height: 220px;
 }
 
 .panel-section {
@@ -652,7 +711,10 @@ p {
 /* Route timeline */
 
 .timeline-section {
-  flex: none;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .section-heading {
@@ -667,6 +729,9 @@ p {
 }
 
 .timeline {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   margin: 0;
   padding: 0 4px 0 0;
   list-style: none;
@@ -775,11 +840,11 @@ p {
 }
 
 .status-text.status-passed {
-  color: #5b6577;
+  color: #9ca3af;
 }
 
 .timeline-row.next .timeline-marker {
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.1);
 }
 
 .timeline-ambulance {
@@ -823,24 +888,18 @@ p {
     right: 14px;
     top: 60px;
   }
-
-  .panel {
-    overflow: visible;
-  }
-
-  .trip-metrics {
-    position: static;
-    box-shadow: none;
-  }
 }
 
-/* ================= AI agent feed (side panel) ================= */
+/* ================= AI agent feed (on the map) ================= */
+
 
 .agent-feed {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-raised);
+  border-radius: 12px;
+  background: var(--overlay);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 .agent-feed-heading {
@@ -977,9 +1036,10 @@ p {
   padding: 4px;
   list-style: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-radius: 14px;
+  /* Solid, so the form underneath never shows through. */
+  background: var(--surface-solid);
+  box-shadow: 0 12px 28px rgba(42, 26, 29, 0.18);
 }
 
 .suggestions button {
@@ -995,7 +1055,7 @@ p {
 }
 
 .suggestions button:hover {
-  background: rgba(96, 165, 250, 0.12);
+  background: var(--mustard-soft);
 }
 
 .pick-button {
@@ -1014,7 +1074,7 @@ p {
 }
 
 .field-error {
-  color: #fca5a5;
+  color: var(--text-red);
   font-size: 12px;
 }
 
@@ -1025,7 +1085,7 @@ p {
   margin-top: 4px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(96, 165, 250, 0.08);
+  background: var(--surface-raised);
   font-size: 12px;
   color: var(--muted);
 }
@@ -1055,10 +1115,13 @@ p {
 
 /* ================= Live traffic card (on the map) ================= */
 
-/* Top right of the map: view switch and follow toggle */
+/* Top-right column: view switch, follow toggle, live traffic */
+/* Right side of the map, top to bottom: controls, cards (scrolling when
+   there are many), AI agent feed - one column, so nothing overlaps. */
 .map-side {
   top: 14px;
   right: 14px;
+  bottom: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1079,13 +1142,32 @@ p {
   flex: none;
 }
 
+.map-side-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.map-side-cards > * {
+  flex: none;
+}
+
+.map-side .agent-feed {
+  flex: none;
+  margin-top: auto;
+}
+
 .view-toggle {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(17, 24, 39, 0.9);
+  background: var(--overlay);
   backdrop-filter: blur(8px);
 }
 
@@ -1111,7 +1193,7 @@ p {
   position: relative;
   width: 100%;
   height: 100%;
-  background: #1b1f27;
+  background: var(--map-bg);
 }
 
 .chase-waiting {
@@ -1122,7 +1204,7 @@ p {
   padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(17, 24, 39, 0.9);
+  background: var(--overlay);
   color: var(--muted);
   font-size: 13px;
 }
@@ -1131,7 +1213,8 @@ p {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface-raised);
+  background: var(--overlay);
+  backdrop-filter: blur(8px);
   font-size: 12.5px;
   line-height: 1.45;
 }
@@ -1246,7 +1329,7 @@ p {
   bottom: 70px;
   transform: translateX(-50%);
   z-index: 5;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
 }
 
 /* Police for the stretches of the route without signals */
@@ -1367,7 +1450,7 @@ p {
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
 }
 
 .map .leaflet-popup-content {
@@ -1405,11 +1488,11 @@ p {
 }
 
 .station-state.status-unit_en_route {
-  color: #60a5fa;
+  color: var(--text-blue);
 }
 
 .station-state.status-on_scene {
-  color: #2dd4bf;
+  color: var(--text-teal);
 }
 
 /* Nearby police card */
@@ -1488,7 +1571,7 @@ p {
 }
 
 .station-task {
-  color: #93c5fd;
+  color: var(--text-blue);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -1496,19 +1579,19 @@ p {
 .incident-button {
   width: 100%;
   padding: 8px 12px;
-  border-color: rgba(220, 38, 38, 0.55);
-  background: rgba(127, 29, 29, 0.85);
-  color: #fee2e2;
+  border-color: rgba(220, 38, 38, 0.45);
+  background: var(--danger-bg);
+  color: var(--text-red);
   font-size: 13px;
 }
 
 .incident-button:not(:disabled):hover {
-  background: rgba(185, 28, 28, 0.95);
+  background: var(--danger-bg-hover);
 }
 
 .incident-button:disabled {
   border-color: var(--border);
-  background: var(--surface-raised);
+  background: var(--overlay);
   color: var(--muted);
   cursor: not-allowed;
 }
@@ -1530,9 +1613,1723 @@ p {
   font-size: 12px;
 }
 
-/* Links styled as buttons (header navigation) */
+/* ================= Several ambulances (fleet panel) ================= */
+
+.condition-select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.condition-select:focus {
+  outline: 2px solid rgba(96, 165, 250, 0.45);
+  outline-offset: 0;
+}
+
+.condition-select:disabled {
+  opacity: 0.55;
+}
+
+.fleet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fleet .section-heading {
+  margin-bottom: 0;
+}
+
+.fleet-incident-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fleet .muted,
+.fleet-status,
+.fleet-route {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fleet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fleet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.fleet-item.status-arrived {
+  opacity: 0.7;
+}
+
+.fleet-item.selected {
+  border-color: var(--text-blue);
+  box-shadow: inset 3px 0 var(--text-blue);
+}
+
+.fleet-view-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fleet-view-actions .button {
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.map-ambulance {
+  cursor: pointer;
+}
+
+.fleet-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fleet-item-top strong {
+  font-size: 13.5px;
+}
+
+.fleet-status {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.fleet-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.level-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.level-badge.critical {
+  background: rgba(220, 38, 38, 0.18);
+  color: var(--text-red);
+}
+
+.level-badge.urgent {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--text-amber);
+}
+
+.level-badge.stable {
+  background: rgba(34, 197, 94, 0.14);
+  color: var(--text-green);
+}
+
+.fleet-condition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.give-way {
+  padding: 6px 8px;
+  border-left: 3px solid var(--ready);
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--text-amber);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fleet-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fleet-add .button {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+
+.referee-log ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.map-ambulance.other {
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+}
+
+.agent-message.kind-referee {
+  border-left-color: var(--ready);
+}
+
+.agent-message.kind-priority {
+  border-left-color: #a855f7;
+}
+
+/* Booked ambulances (before the start) */
+.booking-remove {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.booking-remove:hover {
+  color: var(--text-red);
+}
+
+.booking-hint {
+  color: var(--muted);
+}
+
+/* ================= Control room (#/control-room) ================= */
+
+.cr {
+  min-height: 100vh;
+  padding: 16px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--bg);
+}
+
+.cr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cr-header h1 {
+  font-size: 20px;
+}
+
+.cr-header p,
+.cr-muted,
+.cr-empty {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.cr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cr-header-actions a.button {
+  text-decoration: none;
+}
+
+.cr-stop:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.5);
+  color: var(--text-red);
+}
+
+.cr-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.cr-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.cr-kpi span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cr-kpi strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  text-transform: capitalize;
+}
+
+.cr-notice {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.1);
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.cr-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.cr-logs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.cr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.cr-card h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cr-map-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cr-map {
+  height: 520px;
+  width: 100%;
+}
+
+.cr-map .leaflet-tile-pane {
+  filter: var(--tile-filter);
+}
+
+.cr-ambulances,
+.cr-log,
+.cr-stations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cr-ambulances {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.cr-ambulance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
+.cr-ambulance.selected {
+  border-color: var(--accent);
+}
+
+.cr-ambulance-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cr-right {
+  margin-left: auto;
+}
+
+.cr-flag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--text-amber);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cr-log {
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cr-log li {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+}
+
+.cr-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.cr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.cr-table th {
+  position: sticky;
+  top: 0;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+
+.cr-table td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.cr-warning {
+  padding: 6px 8px;
+  border-left: 3px solid var(--ready);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--text-amber);
+  font-size: 12px;
+}
+
+.cr-stations li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cr-stations li > div:first-child {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.cr-stations input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+@media (max-width: 1000px) {
+  .cr-main,
+  .cr-logs {
+    grid-template-columns: 1fr;
+  }
+
+  .cr-map {
+    height: 380px;
+  }
+}
+
+/* Live status (side panel): live traffic, deadlock watch, police and
+   the AI agent's messages - in the panel, so they never hide the map. */
+.live-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-status .section-heading {
+  margin-bottom: 0;
+}
+
+.live-status-empty {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Links styled as buttons (header: Control room, Admin) */
 a.button {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+
+/* Section headings with a note beside them keep a gap. */
+.section-heading {
+  gap: 12px;
+}
+
+/* Expanded map: full width, side panel hidden. */
+.content.map-expanded {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.content.map-expanded > .panel {
+  display: none;
+}
+
+.expand-toggle {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  background: var(--overlay);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+}
+
+/* Admin tabs (Live · Trips & grievances): links in the playback style. */
+.admin-tabs a {
+  padding: 6px 12px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-tabs a.active {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+/* Small hospital markers (all hospitals) and the click / hover cards. */
+.map-place-small {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.map-place-small:hover {
+  opacity: 1;
+  filter: none;
+  transform: scale(1.4);
+}
+
+.place-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 180px;
+  font-size: 12.5px;
+}
+
+.place-popup strong {
+  font-size: 13.5px;
+}
+
+.place-popup-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.place-popup-actions .button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* The dispatcher's calls to hospitals (trip planner). */
+.hospital-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.hospital-calls ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+}
+
+.hospital-calls .call-accepted {
+  color: var(--text-green);
+}
+
+.hospital-calls .call-declined {
+  color: var(--text-red);
+}
+
+/* The whole journey: planner option, summary line and patient marker. */
+.planner .from-base-toggle input {
+  width: auto;
+  margin-top: 2px;
+  padding: 0;
+}
+
+.from-base-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.plan-journey {
+  color: var(--text);
+}
+
+.map-patient {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #ec4899;
+  border: 2px solid #ffffff;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+}
+
+/* ================= Fold-out sections (clean main screen) ================= */
+
+.collapsible > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible > summary::before {
+  content: "▸";
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+.collapsible[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.collapsible > summary > span:first-child {
+  margin-right: auto;
+}
+
+.collapsible > summary:hover {
+  color: var(--text);
+}
+
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* A whole panel section that folds (live status, route signals). */
+.panel-section.collapsible > summary {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Compact ambulance rows */
+.fleet-item {
+  cursor: pointer;
+}
+
+.fleet-item.selected {
+  border-color: var(--accent);
+}
+
+.fleet-line {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fleet-line.waiting {
+  color: var(--text-amber);
+}
+
+/* The legend, folded behind a button on the map. */
+.legend-toggle {
+  pointer-events: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--overlay);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Legend button and the legend it opens (bottom left of the map). */
+.map-legend-wrap {
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 358px);
+}
+
+.map-legend-wrap .map-legend {
+  position: static;
+  max-width: none;
+}
+
+/* "Ask AI" chat (AskChat.jsx): floating button and panel. */
+.ask-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1200;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+}
+
+.ask-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1200;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(480px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+}
+
+.ask-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ask-link {
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ask-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-turn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.ask-user {
+  align-self: flex-end;
+  background: rgba(96, 165, 250, 0.18);
+}
+
+.ask-assistant {
+  align-self: flex-start;
+  background: var(--surface-raised);
+}
+
+.ask-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-suggestion {
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ask-error {
+  margin: 0 12px;
+}
+
+.ask-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ask-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.agent-message.kind-hospital {
+  border-left-color: #14b8a6;
+}
+
+/* 108 dispatch: hospital preference, ambulances considered, unit badge. */
+.hospital-heading {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.planner .inline-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.planner .inline-check input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.dispatch-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dispatch-list .chosen {
+  color: var(--text-green);
+}
+
+.unit-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.unit-badge.unit-ALS {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--text-red);
+}
+
+.unit-badge.unit-BLS {
+  background: rgba(71, 85, 105, 0.12);
+  color: var(--muted);
+}
+
+.fleet-line.hospital-line {
+  color: var(--text-teal);
+}
+
+/* 108 ambulances not on a call (map). */
+.map-unit {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+
+.map-unit svg {
+  width: 14px;
+  height: 14px;
+}
+
+.map-unit span {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  font-size: 9px;
+  font-weight: 800;
+  background: #111827;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+.map-unit.unit-ALS {
+  background: var(--text-red);
+}
+
+.map-unit.unit-BLS {
+  background: #475569;
+}
+
+.map-unit.unit-available {
+  opacity: 0.6;
+}
+
+.map-unit.unit-returning,
+.map-unit.unit-handover {
+  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.45);
+}
+
+
+/* =========================================================
+   Burgundy & mustard look (light and dark): warm cream page, cream
+   cards with big rounded corners, a burgundy header bar with a
+   mustard stripe, burgundy for the key card and main actions, mustard
+   as the second accent, serif headings. Status colours stay separate:
+   bright red = problem, orange = waiting, green = cleared.
+   Placed last so it refines the rules above.
+   ========================================================= */
+
+body {
+  background: var(--page-bg);
+  background-attachment: fixed;
+}
+
+h1,
+h2,
+.eta-value,
+.brand h1 {
+  font-family: var(--heading-font);
+  font-weight: 700;
+}
+
+/* Header: burgundy bar, cream text, mustard stripe */
+
+.header,
+.cr-header {
+  position: relative;
+  z-index: 1100;
+  padding: 12px 22px;
+  background: var(--brand-grad);
+  color: var(--cream);
+  border-bottom: 3px solid var(--mustard);
+}
+
+.header .brand h1,
+.cr-header h1 {
+  color: var(--cream);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.header .brand p {
+  color: rgba(246, 236, 217, 0.75);
+}
+
+.header .brand-mark {
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px rgba(246, 236, 217, 0.85);
+}
+
+.header .button-secondary,
+.cr-header .button-secondary {
+  background: rgba(246, 236, 217, 0.1);
+  border-color: rgba(246, 236, 217, 0.22);
+  color: var(--cream);
+}
+
+.header .button-secondary:not(:disabled):hover,
+.cr-header .button-secondary:not(:disabled):hover {
+  background: rgba(246, 236, 217, 0.18);
+}
+
+.header .button-primary {
+  background: var(--mustard);
+  color: #3a1018;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.header .button-primary:not(:disabled):hover {
+  background: var(--mustard);
+  filter: brightness(1.08);
+}
+
+.header .connection,
+.header .playback,
+.cr-header .connection,
+.cr-header .playback {
+  border-color: rgba(246, 236, 217, 0.22);
+  background: rgba(246, 236, 217, 0.1);
+  color: var(--cream);
+}
+
+.header .playback span,
+.header .playback button,
+.header .playback a,
+.cr-header .playback span,
+.cr-header .playback a {
+  color: rgba(246, 236, 217, 0.8);
+}
+
+.header .playback button.active,
+.header .playback a.active,
+.cr-header .playback a.active {
+  background: var(--mustard);
+  color: #3a1018;
+}
+
+/* Layout and cards */
+
+.content {
+  gap: 16px;
+  padding: 16px;
+}
+
+.map-wrapper {
+  border-radius: 26px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.panel {
+  gap: 14px;
+}
+
+.panel-section {
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.panel-section h2 {
+  color: var(--accent);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+/* The key card: burgundy, like a profile card */
+
+.eta {
+  background: var(--brand-grad);
+  border-color: transparent;
+  color: var(--cream);
+}
+
+.eta-label,
+.eta-sub {
+  color: rgba(246, 236, 217, 0.78);
+}
+
+.eta-badge {
+  background: var(--mustard);
+  color: #3a1018;
+}
+
+.eta-value {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Buttons */
+
+.button {
+  border-radius: 999px;
+  transition: transform 0.12s ease, filter 0.15s ease, background 0.15s ease;
+}
+
+.button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.button-primary {
+  background: var(--brand-grad);
+  color: #ffffff;
+  box-shadow: var(--brand-glow);
+}
+
+.button-primary:not(:disabled):hover {
+  background: var(--brand-grad);
+  filter: brightness(1.1);
+}
+
+.button-secondary {
+  background: var(--surface-raised);
+  border-color: var(--border);
+}
+
+.connection,
+.playback {
+  border-radius: 999px;
+}
+
+.playback button {
+  border-radius: 999px;
+}
+
+.playback button.active {
+  background: var(--mustard-soft);
+  color: var(--text);
+}
+
+.link-button {
+  color: var(--accent);
+}
+
+/* Inputs */
+
+.planner input,
+.planner select {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--input-bg);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.planner input:focus,
+.planner select:focus {
+  outline: none;
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 3px var(--mustard-soft);
+}
+
+.planner input[type="checkbox"] {
+  accent-color: var(--brand);
+}
+
+/* Floating cards on the map and other panels */
+
+.story,
+.live-card,
+.legend-toggle,
+.expand-toggle,
+.chase-waiting {
+  border-radius: 18px;
+  background: var(--overlay);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow-soft);
+}
+
+.map .leaflet-tooltip,
+.map .leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  background: var(--overlay);
+}
+
+/* Map controls (view and camera toggles) in mustard when active */
+.view-toggle button.active,
+.camera-toggle button.active {
+  background: var(--mustard-soft);
+  color: var(--text);
+}
+
+.fleet-item {
+  border-radius: 18px;
+}
+
+.fleet-item.selected {
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 2px var(--mustard-soft);
+}
+
+.ask-panel {
+  border-radius: 24px;
+  background: var(--overlay);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+}
+
+.ask-toggle {
+  background: var(--brand-grad);
+  color: #ffffff;
+  border: 2px solid var(--mustard);
+  box-shadow: var(--brand-glow);
+}
+
+.ask-user {
+  background: var(--mustard-soft);
+}
+
+/* Warm tint for the 3D view, to match the page */
+:root:not([data-theme="dark"]) .chase-map canvas {
+  filter: sepia(0.25) saturate(0.85);
+}
+
+/* Quiet scrollbars */
+
+.panel::-webkit-scrollbar,
+.timeline::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel::-webkit-scrollbar-thumb,
+.timeline::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(109, 26, 42, 0.22);
+}
+
+.panel::-webkit-scrollbar-track,
+.timeline::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Admin control room (#/admin): the same cream cards. */
+.cr-card,
+.cr-kpis > * {
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.cr-card h2 {
+  color: var(--accent);
+}
+
+/* Admin tabs: round like their pill-shaped bar, so the active (mustard)
+   tab sits evenly inside it. */
+.admin-tabs {
+  padding: 3px;
+  gap: 2px;
+}
+
+.admin-tabs a {
+  border-radius: 999px;
+  padding: 6px 14px;
+  line-height: 1.2;
+}
+
+/* Hospital search box (TripPlanner): options with their details. */
+.hospital-picker-details {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.hospital-options {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.hospital-options button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hospital-options button span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.hospital-options button.chosen {
+  background: var(--mustard-soft);
+}
+
+.hospital-options button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hospital-options .no-match {
+  padding: 7px 8px;
+  font-size: 12.5px;
+}
+
+/* "Report a problem" dialog (ReportProblem.jsx). */
+.report-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(26, 13, 17, 0.45);
+}
+
+.report-dialog {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface-solid);
+  box-shadow: 0 20px 50px rgba(26, 13, 17, 0.3);
+}
+
+.report-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.report-heading h2 {
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.report-form select,
+.report-form input,
+.report-form textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.report-form select:focus,
+.report-form input:focus,
+.report-form textarea:focus {
+  outline: none;
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 3px var(--mustard-soft);
+}
+
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.report-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Admin sidebar (AdminSidebar.jsx): jump to any admin section. */
+.admin-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.admin-shell > .admin-content,
+.admin-shell-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-shell-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.admin-page > .admin-shell {
+  padding-left: 16px;
+}
+
+.admin-sidebar {
+  position: sticky;
+  top: 16px;
+  flex: 0 0 210px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  margin-top: 16px;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.cr .admin-sidebar {
+  margin-top: 0;
+}
+
+.admin-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-sidebar-title {
+  padding: 0 12px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-sidebar a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-sidebar a:hover {
+  background: var(--surface-raised);
+}
+
+.admin-sidebar a.active {
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.admin-sidebar-badge {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--mustard);
+  color: #3a1018;
+  font-size: 11.5px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.admin-sidebar-back {
+  color: var(--muted) !important;
+}
+
+/* Sections land below the top edge, not hidden under it. */
+.admin-anchor {
+  scroll-margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .admin-shell {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    position: static;
+    flex: none;
+    width: 100%;
+    max-height: none;
+  }
+}
+
+/* Admin: one section at a time, full width, with a title. */
+.admin-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 4px 2px;
+}
+
+.admin-section-heading h2 {
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+
+.admin-section-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.admin-page .admin-content {
+  padding-top: 16px;
+}
+
+.cr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cr-section .cr-table-wrap {
+  max-height: none;
+}
+
+.cr-subheading {
+  margin: 0;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* The live overview on the admin dashboard. */
+.cr-embedded {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Police phone numbers (Admin → Police). */
+.phone-format {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--mustard-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.phone-format code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-solid);
+  font-size: 12.5px;
+}
+
+.phone-saved {
+  display: block;
+  margin: 2px 0 4px;
+  font-size: 12px;
+}
+
+.phone-ok {
+  color: var(--text-green);
+  font-size: 12px;
+}
+
+/* "← All trips" on a trip's page: top left, clearly visible. */
+.trip-back {
+  align-self: flex-start;
+  padding: 9px 18px;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--accent);
+  box-shadow: var(--shadow-soft);
+  text-decoration: none;
+}
+
+.trip-back:hover {
+  background: var(--mustard-soft);
+}
+
+/* Corridor roles in the route list (requirements: ACTIVE / PREPARING /
+   STANDBY, then NORMAL once passed), with the ETA to each junction. */
+.junction-code {
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.corridor-role {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.corridor-role.role-active {
+  background: var(--green);
+  color: #ffffff;
+}
+
+.corridor-role.role-preparing {
+  background: var(--ready);
+  color: #ffffff;
+}
+
+.corridor-role.role-standby {
+  background: var(--mustard-soft);
+  color: var(--text);
+}
+
+.corridor-role.role-upcoming {
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+
+.corridor-role.role-normal {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+/* "Describe the emergency" (AI intake) above the trip planner. */
+.intake-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.intake-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.intake-form textarea:focus {
+  outline: none;
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 3px var(--mustard-soft);
+}
+
+.intake-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--mustard-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* What an ambulance is doing (Admin list): a coloured pill. */
+.ambulance-stage {
+  align-self: flex-start;
+  margin: 4px 0 2px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ambulance-stage.stage-patient {
+  background: rgba(234, 122, 26, 0.16);
+  color: var(--text-amber);
+}
+
+.ambulance-stage.stage-hospital {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--text-red);
+}
+
+.ambulance-stage.stage-handover {
+  background: var(--mustard-soft);
+  color: var(--text);
+}
+
+.ambulance-stage.stage-free {
+  background: rgba(22, 163, 74, 0.14);
+  color: var(--text-green);
+}
+
+.ambulance-stage.stage-waiting {
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+
+/* "Labels on / off": stacked with the Legend button (bottom left of the map). */
+.labels-toggle.active {
+  background: var(--mustard);
+  color: #3a1018;
+}
+
+/* "Call police" for a stuck ambulance (crew and control room). */
+.police-call-button {
+  align-self: flex-start;
+  margin-top: 6px;
+  border-color: rgba(37, 99, 235, 0.35);
+  color: var(--text-blue);
+}
+
+.police-call-button:not(:disabled):hover {
+  background: rgba(37, 99, 235, 0.1);
 }

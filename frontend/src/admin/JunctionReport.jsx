@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTheme } from "../theme";
 import {
   Bar,
   BarChart,
@@ -12,8 +13,8 @@ import {
 import { formatDuration } from "../routeStatus";
 
 // One measure (standing time), one hue - the dashboard's series colour.
-const SERIES = "#3987e5";
-const AXIS = { fill: "#8b95a7", fontSize: 12 };
+const SERIES = "#b0475a";
+const AXIS = { fill: "#5b6472", fontSize: 12 };
 const CHART_ROWS = 8;
 
 function shortName(name) {
@@ -24,6 +25,7 @@ function shortName(name) {
 // of 10 s or more is put down to the junction the ambulance was waiting
 // to get through.
 function JunctionReport({ junctions = [] }) {
+  const labelColor = useTheme() === "dark" ? "#e6e9ef" : "#111827";
   const [asTable, setAsTable] = useState(false);
   const rows = junctions.slice(0, CHART_ROWS).map((item) => ({
     ...item,
@@ -131,7 +133,7 @@ function JunctionReport({ junctions = [] }) {
               <LabelList
                 dataKey="minutes"
                 position="right"
-                fill="#e6e9ef"
+                fill={labelColor}
                 fontSize={12}
                 formatter={(value) => `${value} min`}
               />

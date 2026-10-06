@@ -1,6 +1,5 @@
 // The admin dashboard's backend calls (backend/api/routes/admin.py).
-// Same backend address as the live map (App.jsx).
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+import { API_URL } from "../api";
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_URL}/admin${path}`, {
@@ -31,14 +30,14 @@ export const adminApi = {
   requests: (filters) => request(`/requests${query(filters)}`),
   trip: (requestId) => request(`/requests/${encodeURIComponent(requestId)}`),
   junctions: (days) => request(`/junctions${query({ days, limit: 15 })}`),
+  stuckSpots: (days) => request(`/stuck-spots${query({ days })}`),
   updateRequest: (requestId, changes) =>
     request(`/requests/${encodeURIComponent(requestId)}`, {
       method: "PATCH",
       body: JSON.stringify(changes),
     }),
   grievances: (filters) => request(`/grievances${query(filters)}`),
-  createGrievance: (ticket) =>
-    request("/grievances", { method: "POST", body: JSON.stringify(ticket) }),
+  grievanceSummary: () => request("/grievances/summary"),
   updateGrievance: (id, changes) =>
     request(`/grievances/${id}`, {
       method: "PATCH",

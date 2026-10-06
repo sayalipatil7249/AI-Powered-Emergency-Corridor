@@ -23,8 +23,16 @@ CREATE TABLE IF NOT EXISTS ambulance_requests (
 	delay_reason VARCHAR(20), 
 	delay_reason_manual BOOLEAN NOT NULL, 
 	stopped_seconds FLOAT, 
-	stops INTEGER, 
-	source VARCHAR(20) NOT NULL, 
+	stops INTEGER,
+	unit_id VARCHAR(20),
+	unit_kind VARCHAR(5),
+	to_patient_seconds FLOAT,
+	scene_seconds FLOAT,
+	transport_seconds FLOAT,
+	handover_seconds FLOAT,
+	pre_alerted BOOLEAN,
+	diverted BOOLEAN,
+	source VARCHAR(20) NOT NULL,
 	notes VARCHAR(500), 
 	route_geometry JSON, 
 	track JSON, 
@@ -110,3 +118,13 @@ ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS track JSON;
 
 -- Upgrading a database made before plan_status existed:
 ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS plan_status VARCHAR(20);
+
+-- Upgrading a database made before the 108 timeline existed:
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS unit_id VARCHAR(20);
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS unit_kind VARCHAR(5);
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS to_patient_seconds FLOAT;
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS scene_seconds FLOAT;
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS transport_seconds FLOAT;
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS handover_seconds FLOAT;
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS pre_alerted BOOLEAN;
+ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS diverted BOOLEAN;

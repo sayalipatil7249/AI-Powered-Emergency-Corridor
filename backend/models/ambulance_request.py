@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
@@ -80,6 +80,28 @@ class AmbulanceRequest(Base):
     stopped_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     stops: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # The 108 timeline (simulated seconds): dispatch -> at the patient
+    # (to_patient), at the patient (scene), patient on board -> hospital
+    # (transport), at the hospital until handed over (handover). Trips
+    # that start with the patient on board have no to_patient / scene.
+    unit_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    unit_kind: Mapped[str | None] = mapped_column(String(5), nullable=True)
+
+    to_patient_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    scene_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    transport_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    handover_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # The hospital was pre-alerted and ready; the ambulance was diverted
+    # to another hospital on the way.
+    pre_alerted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    diverted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # "simulation" (recorded by the live demo) or "manual"
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="simulation")

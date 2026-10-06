@@ -12,7 +12,7 @@ from backend.database import Base
 # summed up per junction in the problem-junction report.
 TRIP_EVENT_KINDS = (
     "DISPATCH", "STOP", "SIGNAL", "POLICE", "ACCIDENT", "REROUTE", "AI",
-    "ARRIVAL", "END",
+    "GIVE_WAY", "PICKUP", "PRE_ALERT", "DIVERT", "ARRIVAL", "HANDOVER", "END",
 )
 
 

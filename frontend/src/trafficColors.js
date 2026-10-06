@@ -11,5 +11,5 @@ export const ROUTE_TRAFFIC_COLORS = {
 export function carColor(speed) {
   if (speed < 0.5) return "#ef4444";
   if (speed < 3) return "#f59e0b";
-  return "#cbd5e1";
+  return "#94a3b8";
 }

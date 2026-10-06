@@ -5,25 +5,16 @@
 export const DEMO_HOSPITAL_NAME = "Ruby Hall Clinic";
 
 export const SIGNAL_STATUS = {
-  GREEN: { label: "Green for ambulance", className: "status-green" },
+  GREEN: { label: "Green", className: "status-green" },
   TURNING: { label: "Turning green", className: "status-turning" },
-  READY: { label: "Next · normal cycle", className: "status-ready" },
-  WAITING: { label: "Waiting", className: "status-waiting" },
+  READY: { label: "Next", className: "status-ready" },
+  WAITING: { label: "Ahead", className: "status-waiting" },
   PASSED: { label: "Passed", className: "status-passed" },
 };
 
 // A signal's name: the streets meeting there, else "Signal 3".
 export function signalLabel(signal) {
   return signal.name || `Signal ${signal.number}`;
-}
-
-// For sentences: "the signal at Bund Garden Road × ..." or "Signal 3".
-function signalPhrase(signal) {
-  return signal.name ? `the signal at ${signal.name}` : `Signal ${signal.number}`;
-}
-
-function capitalize(text) {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export function formatDistance(meters) {
@@ -91,9 +82,16 @@ export function getRouteSignalStatuses({
       status = "READY";
     }
 
+    // The corridor role from the requirements: ACTIVE (next junction,
+    // getting priority), PREPARING (the one after), STANDBY (third),
+    // UPCOMING (further), and NORMAL again once the ambulance passed.
+    const role = status === "PASSED" ? "NORMAL" : junction?.state || null;
+
     return {
       ...routeSignal,
       status,
+      role,
+      etaSeconds: status === "PASSED" ? null : junction?.eta_seconds ?? null,
       distanceMeters: junction?.distance_meters ?? null,
       switchInSeconds: junction?.switch_in_seconds ?? null,
       queuedCars: junction?.queued_cars ?? null,
@@ -115,12 +113,14 @@ export function getRouteSignalStatuses({
   return junctions;
 }
 
-// One plain-language sentence describing what is happening now.
+// One short line describing what is happening now.
 export function getStory({
   connected,
   simulationState,
   routeStatuses,
   hospitalName = DEMO_HOSPITAL_NAME,
+  ambulanceLabel = "The ambulance",
+  planPending = false,
 }) {
   const status = simulationState?.status;
   const ambulance = simulationState?.ambulance;
@@ -128,21 +128,40 @@ export function getStory({
   if (!connected) {
     return {
       tone: "muted",
-      text: "Connecting to the backend… make sure it is running.",
+      text: "Connecting…",
     };
   }
 
   if (status === "error") {
     return {
       tone: "error",
-      text: `Something went wrong: ${simulationState.error || "unknown error"}`,
+      text: `Error: ${simulationState.error || "unknown"}`,
     };
   }
 
   if (ambulance?.status === "COMPLETED") {
     return {
       tone: "success",
-      text: `The ambulance reached ${hospitalName}. All signals are back to normal.`,
+      text: `${ambulanceLabel} reached ${hospitalName}.`,
+    };
+  }
+
+  // The whole journey: say which part the ambulance is on.
+  const hasPickup = Boolean(ambulance?.pickup_point);
+  if (status === "running" && hasPickup && ambulance?.leg === "at_patient") {
+    return { tone: "ready", text: `${ambulanceLabel} is picking up the patient (about 3 min)` };
+  }
+  const stage =
+    status === "running" && hasPickup
+      ? ambulance?.leg === "to_patient"
+        ? "is going to the patient"
+        : `has the patient, going to ${hospitalName}`
+      : null;
+
+  if (status === "running" && ambulance?.delay_reason) {
+    return {
+      tone: "muted",
+      text: `${ambulanceLabel} is stopped: ${ambulance.delay_reason}`,
     };
   }
 
@@ -153,72 +172,81 @@ export function getStory({
     );
     return {
       tone: "muted",
-      text: `Traffic is building up across the city (${
-        simulationState.vehicle_count ?? 0
-      } vehicles). The ambulance leaves in ${formatDuration(left)} of simulated time.`,
+      text: `Filling the roads with traffic. Ambulance leaves in ${formatDuration(left)}`,
     };
   }
 
   if (status === "starting" || (status === "running" && !ambulance)) {
     return {
       tone: "muted",
-      text: simulationState?.message || "Starting the simulation…",
+      text: simulationState?.message || "Starting…",
     };
   }
 
   if (status === "running" && ambulance) {
+    const story = drivingStory();
+    return stage ? { ...story, text: `${ambulanceLabel} ${stage} · ${story.text}` } : story;
+  }
+
+  function drivingStory() {
     const next = routeStatuses.find((signal) => signal.status !== "PASSED");
 
     if (!next) {
       return {
         tone: "success",
-        text: `All signals cleared. ${formatDistance(
+        text: `No more signals. ${formatDistance(
           ambulance.distance_left_meters
-        )} left to ${hospitalName}.`,
+        )} to ${hospitalName}`,
       };
     }
 
+    const name = signalLabel(next);
     const away =
-      next.distanceMeters != null
-        ? `, ${formatDistance(next.distanceMeters)} ahead`
-        : "";
+      next.distanceMeters != null ? ` · ${formatDistance(next.distanceMeters)}` : "";
 
     if (next.status === "GREEN") {
       return {
         tone: "go",
-        text: `${capitalize(signalPhrase(next))} is green for the ambulance${away}.`,
+        text: `Green: ${name}${away}`,
       };
     }
 
     if (next.status === "TURNING") {
       return {
         tone: "ready",
-        text: `Turning ${signalPhrase(next)} green: yellow and all red for cross traffic first${away}.`,
+        text: `Turning green: ${name}${away}`,
       };
     }
 
     if (next.status === "READY" && next.switchInSeconds != null) {
       return {
         tone: "muted",
-        text: `${capitalize(signalPhrase(next))}${away}${away ? "," : ""} is on its normal cycle; the AI switches it green in about ${formatDuration(next.switchInSeconds)}.`,
+        text: `Next signal: ${name}${away} · green in ${formatDuration(next.switchInSeconds)}`,
       };
     }
 
     return {
       tone: "muted",
-      text: `Ambulance heading to ${signalPhrase(next)}${away}.`,
+      text: `Next signal: ${name}${away}`,
     };
   }
 
   if (status === "stopped" && ambulance) {
     return {
       tone: "muted",
-      text: "Simulation stopped. Press Start to run it again.",
+      text: "Stopped. Press Start to run again.",
+    };
+  }
+
+  if (planPending) {
+    return {
+      tone: "muted",
+      text: "Press Find route. (Start without it runs the demo trip.)",
     };
   }
 
   return {
     tone: "muted",
-    text: `Plan a trip, or press Start to send the ambulance to ${hospitalName}.`,
+    text: `Plan a trip, or press Start for the demo trip (Shukrawar Peth → ${hospitalName}).`,
   };
 }

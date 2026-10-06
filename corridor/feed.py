@@ -249,6 +249,11 @@ def upcoming_signal_details(engine, route_cache):
     return details
 
 
+# Speed used for junction ETAs while the ambulance is (nearly) stopped,
+# about a typical city speed (m/s).
+ETA_MIN_SPEED = 6.0
+
+
 def corridor_entries(upcoming, signals, ambulance_speed, engine=None):
     """
     The upcoming junctions with their corridor role (J1, J2, ...) and,
@@ -267,10 +272,12 @@ def corridor_entries(upcoming, signals, ambulance_speed, engine=None):
             "route_index": junction["route_index"],
             "tls_index": junction["tls_index"],
             "state": CorridorEngine.role(index),
-            "eta_seconds": (
-                round(junction["distance"] / ambulance_speed, 1)
-                if ambulance_speed > 0
-                else None
+            # About when the ambulance gets there: at its current speed,
+            # but never slower than ETA_MIN_SPEED (so a short stop does
+            # not make every ETA vanish). The next junction uses the AI's
+            # arrival prediction below when there is one.
+            "eta_seconds": round(
+                junction["distance"] / max(ambulance_speed, ETA_MIN_SPEED), 1
             ),
             "distance_meters": junction["distance"],
         }
@@ -282,6 +289,8 @@ def corridor_entries(upcoming, signals, ambulance_speed, engine=None):
                 entry["switch_in_seconds"] = timing["switch_in_seconds"]
                 entry["predicted_arrival_seconds"] = timing["seconds_to_arrival"]
                 entry["queued_cars"] = timing["queued_cars"]
+                if timing.get("seconds_to_arrival") is not None:
+                    entry["eta_seconds"] = round(timing["seconds_to_arrival"], 1)
 
         position = signals.position(junction["signal_id"])
         if position:

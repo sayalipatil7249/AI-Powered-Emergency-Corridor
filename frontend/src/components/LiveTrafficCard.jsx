@@ -1,6 +1,6 @@
 const LEVEL_LABELS = {
   light: "Light",
-  normal: "Moderate",
+  normal: "Normal",
   heavy: "Heavy",
 };
 
@@ -16,21 +16,20 @@ function LiveTrafficCard({ live, tripRunning = false }) {
     <section className="live-card" aria-label="Live Pune traffic">
       <div className="live-card-heading">
         <span className="live-dot" />
-        Live Pune traffic · {live.fetched_at}
+        Pune traffic now · {live.fetched_at}
       </div>
       <p>
-        <strong>{LEVEL_LABELS[live.level] || live.level}</strong> · traffic
-        moving at {live.speed_percent}% of normal speed
+        <strong>{LEVEL_LABELS[live.level] || live.level} traffic</strong>
         {live.closures > 0 &&
-          ` · ${live.closures} ${live.closures === 1 ? "closure" : "closures"}`}
+          ` · ${live.closures} ${live.closures === 1 ? "road" : "roads"} closed`}
       </p>
       {tripRunning && live.car_minutes != null && (
         <p className="muted">
-          A normal car needs ~{Math.round(live.car_minutes)} min for this trip
-          right now
+          A normal car would take about {Math.round(live.car_minutes)} min for
+          this trip now
         </p>
       )}
-      <span className="live-source">Source: TomTom</span>
+      <span className="live-source">From TomTom</span>
     </section>
   );
 }

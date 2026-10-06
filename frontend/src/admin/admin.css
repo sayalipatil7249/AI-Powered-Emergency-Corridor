@@ -4,7 +4,7 @@
 
 .admin-page {
   --good: #0ca30c;
-  --warning: #fab219;
+  --warning: #d97706;
   --critical: #d03b3b;
 
   min-height: 100vh;
@@ -71,8 +71,8 @@
   padding: 10px 14px;
   border: 1px solid rgba(208, 59, 59, 0.5);
   border-radius: 10px;
-  background: rgba(127, 29, 29, 0.35);
-  color: #fecaca;
+  background: var(--danger-bg);
+  color: var(--text-red);
   font-size: 13px;
 }
 
@@ -195,7 +195,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-raised);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
   color: var(--text);
   font-size: 12.5px;
 }
@@ -239,7 +239,7 @@
   display: block;
   height: 100%;
   border-radius: 4px;
-  background: #3987e5;
+  background: var(--mustard);
 }
 
 /* Tables */
@@ -321,8 +321,8 @@
   font-weight: 700;
 }
 
-.admin-priority.priority-high { color: #f87171; }
-.admin-priority.priority-medium { color: #fcd34d; }
+.admin-priority.priority-high { color: var(--text-red); }
+.admin-priority.priority-medium { color: var(--text-amber); }
 .admin-priority.priority-low { color: var(--muted); }
 
 .admin-route-facts {
@@ -337,7 +337,7 @@
 }
 
 .admin-route-facts li.fast {
-  color: #4ade80;
+  color: var(--text-green);
   font-weight: 700;
 }
 
@@ -568,4 +568,101 @@ button.trip-title:hover {
   .trip-layout {
     grid-template-columns: 1fr;
   }
+}
+
+.admin-subheading {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+
+/* Burgundy & mustard look (see index.css): cream cards, serif headings. */
+.admin-card,
+.admin-tile {
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.admin-card h2 {
+  color: var(--accent);
+  font-size: 16px;
+  text-transform: none;
+}
+
+/* Small section labels stay in the plain font. */
+.admin-subheading {
+  font-family: inherit;
+}
+
+/* Trip log: scrolls inside its own box (newest first), so the page does
+   not grow with every trip; the column titles stay visible. */
+.admin-table-scroll {
+  max-height: 460px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.admin-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-solid);
+}
+
+/* A chart across both columns of the dashboard grid. */
+.admin-grid-wide {
+  grid-column: 1 / -1;
+}
+
+.admin-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* "Where ambulances get stuck" map (StuckSpotsMap.jsx). */
+.stuck-map {
+  height: 380px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* The trip a complaint is about: a link to the trip's page. */
+.ticket-trip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.ticket-trip:hover {
+  color: var(--accent);
+}
+
+.ticket-trip-id {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--mustard-soft);
+  color: var(--accent);
+  font-weight: 700;
 }

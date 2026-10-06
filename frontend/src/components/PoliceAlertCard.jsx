@@ -1,11 +1,11 @@
 import { formatDuration } from "../routeStatus";
 
 const STATUS_LABELS = {
-  ALERTED: "Alert sent",
-  EN_ROUTE: "Police on the way",
+  ALERTED: "Police called",
+  EN_ROUTE: "Police coming",
   ON_SCENE: "Police clearing traffic",
-  PASSED: "Ambulance through",
-  CANCELLED: "Stood down",
+  PASSED: "Ambulance got through",
+  CANCELLED: "Not needed any more",
 };
 
 // What happened to the phone call (backend/services/police_notifier.py;
@@ -15,15 +15,15 @@ const CALL_LABELS = {
   queued: "calling…",
   initiated: "calling…",
   ringing: "ringing",
-  "in-progress": "answered, message playing",
+  "in-progress": "answered",
   completed: "answered",
   busy: "busy",
   "no-answer": "no answer",
   failed: "call failed",
   canceled: "call cancelled",
-  off: "calls are off",
-  no_number: "no test phone set",
-  limit: "call limit reached",
+  off: "calls turned off",
+  no_number: "no test phone number",
+  limit: "too many calls",
 };
 
 const ACTIVE = ["ALERTED", "EN_ROUTE", "ON_SCENE"];
@@ -84,8 +84,7 @@ function PoliceAlertCard({ policeWatch, board, stations = [] }) {
 
       {shown.length === 0 ? (
         <p className="police-quiet">
-          {jammed > 0 ? "Checking a jam" : "No jams"} on the{" "}
-          {stretches.length} roads without signals.
+          {jammed > 0 ? "Checking a jam on a road without signals." : "No jams on roads without signals."}
         </p>
       ) : (
         <ul className="police-alerts">
@@ -96,9 +95,7 @@ function PoliceAlertCard({ policeWatch, board, stations = [] }) {
               <span className="muted">
                 {alert.station}
                 {(alert.status === "ALERTED" || alert.status === "EN_ROUTE") &&
-                  ` · police ~${formatDuration(alert.police_eta_seconds)}`}
-                {alert.status === "ON_SCENE" &&
-                  ` · ${alert.vehicles_waved} vehicles waved through`}
+                  ` · police in ~${formatDuration(alert.police_eta_seconds)}`}
                 {alert.closed_reason && ` · ${alert.closed_reason}`}
               </span>
               {alert.call && (
@@ -111,7 +108,7 @@ function PoliceAlertCard({ policeWatch, board, stations = [] }) {
 
       {nearby.length > 0 && (
         <>
-          <div className="police-subheading">Nearest to the ambulance</div>
+          <div className="police-subheading">Police stations nearby</div>
           <ul className="nearby-police">
             {nearby.map((name) => {
               const station = live[name];

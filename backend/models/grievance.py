@@ -6,8 +6,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.database import Base
 
 
-GRIEVANCE_ROLES = ("USER", "DRIVER", "HOSPITAL", "POLICE", "OTHER")
-GRIEVANCE_CATEGORIES = ("DELAY", "ROUTE", "VEHICLE", "STAFF", "APP", "OTHER")
+# SYSTEM: filed automatically by the app when something goes wrong.
+# DRIVER: the ambulance crew (medic / driver), who use the app.
+GRIEVANCE_ROLES = (
+    "DRIVER", "CALL_CENTRE", "HOSPITAL", "POLICE", "USER", "OTHER", "SYSTEM",
+)
+GRIEVANCE_CATEGORIES = (
+    "DELAY", "ROUTE", "HOSPITAL", "POLICE", "VEHICLE", "STAFF", "APP", "OTHER",
+)
 GRIEVANCE_PRIORITIES = ("LOW", "MEDIUM", "HIGH")
 GRIEVANCE_STATUSES = ("OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED")
 

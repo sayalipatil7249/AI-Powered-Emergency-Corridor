@@ -1,12 +1,14 @@
+import Collapsible from "./Collapsible";
 import RouteTimeline from "./RouteTimeline";
 import { formatDistance, formatDuration } from "../routeStatus";
 
 function TripPanel({
   ambulance,
+  ambulanceLabel,
   routeStatuses,
-  vehicleCount,
   hospitalName,
   planner,
+  fleet,
   live,
 }) {
   const passedCount = routeStatuses.filter(
@@ -23,13 +25,51 @@ function TripPanel({
     etaValue = formatDuration(ambulance.eta_seconds);
   }
 
-  // Top to bottom: plan a trip, live status, route, trip metrics (the
-  // metrics stay pinned to the bottom while the panel scrolls).
   return (
     <aside className="panel">
       {planner}
+      {fleet}
 
-      {live}
+      <section className="panel-section eta">
+        <span className="eta-label">
+          {ambulanceLabel && `${ambulanceLabel} · `}
+          {arrived ? "Reached hospital in" : "Arrives in"}
+          {!arrived && ambulance?.eta_source === "ai" && (
+            <span className="eta-badge">AI</span>
+          )}
+        </span>
+        <strong className="eta-value">{etaValue}</strong>
+        <span className="eta-sub">
+          {!arrived && ambulance?.trip_time_seconds != null
+            ? `Driving for ${formatDuration(ambulance.trip_time_seconds)}`
+            : arrived
+              ? "Trip done"
+              : "Not started yet"}
+        </span>
+      </section>
+
+      <section className="panel-section stats">
+        <div className="stat">
+          <span>Speed</span>
+          <strong>
+            {ambulance?.speed != null && !arrived
+              ? `${Math.round(ambulance.speed * 3.6)} km/h`
+              : "--"}
+          </strong>
+        </div>
+        <div className="stat">
+          <span>Distance left</span>
+          <strong>{formatDistance(ambulance?.distance_left_meters)}</strong>
+        </div>
+        <div className="stat">
+          <span>Signals passed</span>
+          <strong>
+            {routeStatuses.length > 0
+              ? `${passedCount}/${routeStatuses.length}`
+              : "--"}
+          </strong>
+        </div>
+      </section>
 
       <RouteTimeline
         routeStatuses={routeStatuses}
@@ -37,58 +77,16 @@ function TripPanel({
         hospitalName={hospitalName}
       />
 
-      <div className="trip-metrics">
-        <section className="panel-section eta">
-          <span className="eta-label">
-            {arrived ? "Reached hospital in" : "Estimated arrival in"}
-            {!arrived && ambulance?.eta_source === "ai" && (
-              <span className="eta-badge">AI</span>
-            )}
-          </span>
-          <strong className="eta-value">{etaValue}</strong>
-          <span className="eta-sub">
-            {!arrived && ambulance?.trip_time_seconds != null
-              ? `On the road for ${formatDuration(ambulance.trip_time_seconds)}`
-              : arrived
-                ? "Trip complete"
-                : "Waiting for the trip to start"}
-          </span>
-          {!arrived &&
-            ambulance?.eta_source === "ai" &&
-            ambulance.formula_eta_seconds != null && (
-              <span className="eta-compare">
-                Simple formula says {formatDuration(ambulance.formula_eta_seconds)}
-              </span>
-            )}
-        </section>
-
-        <section className="panel-section stats">
-          <div className="stat">
-            <span>Speed</span>
-            <strong>
-              {ambulance?.speed != null && !arrived
-                ? `${Math.round(ambulance.speed * 3.6)} km/h`
-                : "--"}
-            </strong>
-          </div>
-          <div className="stat">
-            <span>Distance left</span>
-            <strong>{formatDistance(ambulance?.distance_left_meters)}</strong>
-          </div>
-          <div className="stat">
-            <span>Signals passed</span>
-            <strong>
-              {routeStatuses.length > 0
-                ? `${passedCount}/${routeStatuses.length}`
-                : "--"}
-            </strong>
-          </div>
-          <div className="stat">
-            <span>Vehicles</span>
-            <strong>{vehicleCount}</strong>
-          </div>
-        </section>
-      </div>
+      {/* Traffic, jam prediction, police and AI messages: on demand. */}
+      {live && (
+        <Collapsible
+          title="Updates"
+          hint="traffic, police, messages"
+          className="panel-section"
+        >
+          {live}
+        </Collapsible>
+      )}
     </aside>
   );
 }

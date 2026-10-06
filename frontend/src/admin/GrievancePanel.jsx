@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 
 import { adminApi, formatDateTime, label } from "./adminApi";
 
-const EMPTY_TICKET = {
-  raised_by_role: "USER",
-  raised_by_name: "",
-  category: "DELAY",
-  priority: "MEDIUM",
-  request_id: "",
-  subject: "",
-  description: "",
+// Who raised a complaint, in plain words.
+const ROLE_NAMES = {
+  DRIVER: "Ambulance crew",
+  CALL_CENTRE: "108 control room",
+  HOSPITAL: "Hospital staff",
+  POLICE: "Police",
+  SYSTEM: "Automatic",
+  USER: "Public",
 };
 
 const STATUS_TONES = {
@@ -29,87 +29,6 @@ function Select({ value, options, onChange, all, ...props }) {
         </option>
       ))}
     </select>
-  );
-}
-
-function NewTicketForm({ options, onCreated, onCancel }) {
-  const [ticket, setTicket] = useState(EMPTY_TICKET);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const set = (key) => (value) => setTicket({ ...ticket, [key]: value });
-
-  const submit = async (event) => {
-    event.preventDefault();
-    try {
-      setSaving(true);
-      setError("");
-      const created = await adminApi.createGrievance(ticket);
-      setTicket(EMPTY_TICKET);
-      onCreated(created);
-    } catch (problem) {
-      setError(problem.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form className="admin-form" onSubmit={submit}>
-      <label>
-        Raised by
-        <Select value={ticket.raised_by_role} options={options.grievance_roles} onChange={set("raised_by_role")} />
-      </label>
-      <label>
-        Name
-        <input
-          value={ticket.raised_by_name}
-          onChange={(event) => set("raised_by_name")(event.target.value)}
-          placeholder="Optional"
-        />
-      </label>
-      <label>
-        Category
-        <Select value={ticket.category} options={options.grievance_categories} onChange={set("category")} />
-      </label>
-      <label>
-        Priority
-        <Select value={ticket.priority} options={options.grievance_priorities} onChange={set("priority")} />
-      </label>
-      <label>
-        Request ID
-        <input
-          value={ticket.request_id}
-          onChange={(event) => set("request_id")(event.target.value)}
-          placeholder="e.g. REQ-20260929-101123"
-        />
-      </label>
-      <label className="wide">
-        Subject
-        <input
-          value={ticket.subject}
-          onChange={(event) => set("subject")(event.target.value)}
-          required
-          maxLength={200}
-        />
-      </label>
-      <label className="wide">
-        Description
-        <textarea
-          rows={3}
-          value={ticket.description}
-          onChange={(event) => set("description")(event.target.value)}
-        />
-      </label>
-      {error && <p className="field-error wide">{error}</p>}
-      <div className="admin-form-actions wide">
-        <button type="button" className="button button-secondary" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="button button-primary" disabled={saving}>
-          {saving ? "Saving…" : "Raise ticket"}
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -143,10 +62,25 @@ function TicketRow({ ticket, statuses, onSaved }) {
         </td>
         <td>
           <strong>{ticket.subject}</strong>
-          {ticket.request_id && <span className="muted">{ticket.request_id}</span>}
+          {ticket.request_id && (
+            <a
+              className="ticket-trip"
+              href={`#/admin/trip/${encodeURIComponent(ticket.request_id)}`}
+              title="Open this trip: map and timeline"
+            >
+              <span className="ticket-trip-id">Trip {ticket.request_id}</span>
+              {ticket.trip && (
+                <span>
+                  {ticket.trip.start_name || "--"} → {ticket.trip.hospital_name || "--"}
+                  {ticket.trip.ambulance_id &&
+                    ` · ${ticket.trip.ambulance_id.replace("ambulance_0", "Ambulance ").replace("ambulance_", "Ambulance ")}`}
+                </span>
+              )}
+            </a>
+          )}
         </td>
         <td>
-          {label(ticket.raised_by_role)}
+          {ROLE_NAMES[ticket.raised_by_role] || label(ticket.raised_by_role)}
           {ticket.raised_by_name && <span className="muted">{ticket.raised_by_name}</span>}
         </td>
         <td>{label(ticket.category)}</td>
@@ -201,8 +135,14 @@ function GrievancePanel({ options, onChanged }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
   const [reload, setReload] = useState(0);
+
+  // New complaints arrive from the main screen and the app itself:
+  // check for them every 15 s.
+  useEffect(() => {
+    const timer = setInterval(() => setReload((value) => value + 1), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Reload when a filter changes (search waits until typing pauses).
   useEffect(() => {
@@ -231,27 +171,15 @@ function GrievancePanel({ options, onChanged }) {
     <section className="admin-card">
       <div className="admin-card-heading">
         <div>
-          <h2>Grievance tickets</h2>
-          <p className="muted">Complaints from users, drivers, hospitals and police</p>
+          <h2>Complaints</h2>
+          <p className="muted">
+            Raised by ambulance crews (and the 108 control room, hospitals,
+            police) with &ldquo;Report a problem&rdquo;, or filed automatically
+            when something goes wrong · set the status and add a note when
+            solved
+          </p>
         </div>
-        {!creating && (
-          <button className="button button-primary" onClick={() => setCreating(true)}>
-            New ticket
-          </button>
-        )}
       </div>
-
-      {creating && (
-        <NewTicketForm
-          options={options}
-          onCancel={() => setCreating(false)}
-          onCreated={() => {
-            setCreating(false);
-            setReload((value) => value + 1);
-            onChanged();
-          }}
-        />
-      )}
 
       <div className="admin-filters" role="group" aria-label="Filter tickets">
         <input

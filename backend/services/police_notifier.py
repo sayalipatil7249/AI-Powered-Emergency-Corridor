@@ -54,8 +54,13 @@ def _setting(name):
 
 
 def _phone(number):
-    """"+1 (234) 567-8940" -> "+12345678940" (the form Twilio expects)."""
-    return "".join(ch for ch in (number or "") if ch.isdigit() or ch == "+")
+    """"+91 98765 43210" or "9876543210" -> "+919876543210" (the form
+    Twilio expects; see police_station_service.clean_phone)."""
+    from backend.services.police_station_service import clean_phone
+    try:
+        return clean_phone(number) if number else ""
+    except ValueError:
+        return "".join(ch for ch in (number or "") if ch.isdigit() or ch == "+")
 
 
 def message_for(alert):

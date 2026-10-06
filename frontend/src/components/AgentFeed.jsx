@@ -1,14 +1,17 @@
 import { formatDuration } from "../routeStatus";
 
 const KIND_LABELS = {
-  decision: "Decision",
-  warning: "Warning",
+  decision: "Update",
+  warning: "Problem",
   note: "Update",
-  response: "Deadlock response",
-  police: "Police alert",
+  response: "Jam warning",
+  police: "Police",
+  referee: "Who goes first",
+  priority: "Patient",
+  hospital: "Hospital",
 };
 
-// Latest messages from the AI supervisor agent (agent/), newest first.
+// Latest messages (simulation and AI agent), newest first.
 function AgentFeed({ messages = [], departTime }) {
   if (messages.length === 0) {
     return null;
@@ -17,10 +20,10 @@ function AgentFeed({ messages = [], departTime }) {
   const latest = messages.slice(-3).reverse();
 
   return (
-    <section className="agent-feed" aria-label="AI agent messages">
+    <section className="agent-feed" aria-label="Latest updates">
       <div className="agent-feed-heading">
         <span className="agent-dot" />
-        AI agent
+        Latest
       </div>
 
       <ul>
@@ -36,7 +39,7 @@ function AgentFeed({ messages = [], departTime }) {
                   {formatDuration(
                     Math.max(0, message.simulation_time - departTime)
                   )}{" "}
-                  into trip
+                  after leaving
                 </span>
               )}
             </div>

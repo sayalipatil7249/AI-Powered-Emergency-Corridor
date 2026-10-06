@@ -276,6 +276,27 @@ async def get_police_alerts() -> dict:
 
 
 @mcp.tool()
+async def get_fleet() -> dict:
+    """
+    Every ambulance on the road: its patient's condition and priority
+    level (set by its crew), status, ETA, and any give-way instruction
+    from the junction referee (which signal, to which ambulance, the
+    speed it was slowed to). Also the referee's recent decisions: who
+    went first at a shared junction, and why. Read-only: priority is the
+    crew's decision.
+    """
+
+    state = simulation_service.get_state()
+    return {
+        "ambulances": [
+            {key: value for key, value in ambulance.items() if key != "route"}
+            for ambulance in state.get("ambulances", [])
+        ],
+        "referee_decisions": (state.get("referee") or {}).get("decisions", []),
+    }
+
+
+@mcp.tool()
 async def get_corridor_events(limit: int = 15) -> dict:
     """
     The most recent corridor decisions, newest last: which signal became

@@ -15,19 +15,9 @@ router = APIRouter(
 )
 
 
-@router.post("/start")
-def start_simulation(trip: TripRequest | None = None):
-    """
-    Start the simulation. With a start point and hospital, the ambulance
-    takes the fastest route between them; without, the demo trip.
-    """
-
-    if trip is None:
-        return simulation_service.start()
-
-    planned = plan_trip(trip)
-
-    return simulation_service.start({
+def trip_from_plan(trip, planned):
+    """What the simulation needs from a planned trip."""
+    return {
         "roads": planned["roads"],
         "depart_position": planned["depart_position"],
         "arrival_position": planned["arrival_position"],
@@ -35,9 +25,40 @@ def start_simulation(trip: TripRequest | None = None):
         "hospital_name": planned["hospital_name"],
         "stretches": planned["signalless_stretches"],
         "police_along_route": planned["police_along_route"],
-        "start_point": [trip.start.latitude, trip.start.longitude],
+        # With the whole journey the trip starts at the base.
+        "start_point": (
+            [planned["base"]["latitude"], planned["base"]["longitude"]]
+            if planned.get("base") else [trip.start.latitude, trip.start.longitude]
+        ),
         "hospital_point": [trip.hospital.latitude, trip.hospital.longitude],
-    })
+        # The whole journey: the base the ambulance leaves and the
+        # patient it picks up (None for a straight trip).
+        "base": planned.get("base"),
+        "pickup": planned.get("pickup"),
+        # The 108 ambulance sent (corridor/dispatch.py), with the journey.
+        "unit": planned.get("unit"),
+    }
+
+
+@router.post("/start")
+def start_simulation(trip: TripRequest | None = None, condition: str | None = None):
+    """
+    Start the simulation. With a start point and hospital, the ambulance
+    takes the fastest route between them; without, the demo trip.
+    The patient's condition (corridor/priority.py) comes from the trip,
+    or from ?condition= for the demo trip.
+    """
+
+    try:
+        if trip is None:
+            return simulation_service.start(condition=condition)
+
+        planned = plan_trip(trip)
+        return simulation_service.start(
+            trip_from_plan(trip, planned), trip.condition or condition
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
 
 @router.post("/playback-speed")

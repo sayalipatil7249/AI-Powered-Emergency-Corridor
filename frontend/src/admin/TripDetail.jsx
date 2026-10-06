@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import AdminHeader from "./AdminHeader";
 import {
   CircleMarker,
   MapContainer,
@@ -9,8 +10,6 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-import SvgIcon from "../components/SvgIcon";
-import { HOSPITAL_ICON } from "../icons";
 import { formatDistance, formatDuration } from "../routeStatus";
 import { adminApi, formatDateTime, label, planProblem } from "./adminApi";
 import "./admin.css";
@@ -25,7 +24,12 @@ const KINDS = {
   ACCIDENT: { label: "Accident", color: "#c98500" },
   REROUTE: { label: "Re-route", color: "#d95926" },
   AI: { label: "AI watch", color: "#8b95a7" },
+  GIVE_WAY: { label: "Gave way", color: "#d9a400" },
+  PICKUP: { label: "Patient", color: "#ec4899" },
+  PRE_ALERT: { label: "Hospital pre-alert", color: "#14b8a6" },
+  DIVERT: { label: "Diverted", color: "#d95926" },
   ARRIVAL: { label: "Arrival", color: "#0ca30c" },
+  HANDOVER: { label: "Handover", color: "#14b8a6" },
   END: { label: "Ended", color: "#8b95a7" },
 };
 
@@ -53,12 +57,12 @@ function TripMap({ trip, focus }) {
   const planned = trip.route_geometry;
   const track = trip.track.map((point) => [point[0], point[1]]);
   const reroutes = trip.events.filter(
-    (event) => event.kind === "REROUTE" && event.data?.route?.length > 1
+    (event) => ["REROUTE", "DIVERT"].includes(event.kind) && event.data?.route?.length > 1
   );
   const markers = trip.events.filter(
     (event) =>
       event.latitude != null &&
-      ["STOP", "SIGNAL", "POLICE", "ACCIDENT"].includes(event.kind)
+      ["STOP", "SIGNAL", "POLICE", "ACCIDENT", "GIVE_WAY", "PICKUP", "DIVERT"].includes(event.kind)
   );
   const bounds = useMemo(
     () => (track.length > 1 ? track : planned),
@@ -124,7 +128,7 @@ function TripMap({ trip, focus }) {
               center={[event.latitude, event.longitude]}
               radius={radius}
               pathOptions={{
-                color: "#0b1120",
+                color: "#ffffff",
                 weight: 2,
                 fillColor: kind.color,
                 fillOpacity: 0.9,
@@ -163,7 +167,7 @@ function TripMap({ trip, focus }) {
         {reroutes.length > 0 && (
           <li><span className="trip-line dashed" style={{ color: REROUTE_COLOR }} />New route</li>
         )}
-        {["STOP", "SIGNAL", "POLICE", "ACCIDENT"].map((kind) => (
+        {["STOP", "SIGNAL", "POLICE", "ACCIDENT", "GIVE_WAY", "PICKUP", "DIVERT"].map((kind) => (
           <li key={kind}>
             <span className="admin-swatch round" style={{ background: KINDS[kind].color }} />
             {KINDS[kind].label}
@@ -213,29 +217,20 @@ function TripDetail({ requestId }) {
 
   return (
     <div className="admin-page">
-      <header className="header">
-        <div className="brand">
-          <SvgIcon svg={HOSPITAL_ICON} className="brand-mark" />
-          <div>
-            <h1>{requestId}</h1>
-            <p>
-              {trip
-                ? `${trip.start_name || "--"} to ${trip.hospital_name || "--"} · ${formatDateTime(trip.dispatched_at)}`
-                : "Trip details"}
-            </p>
-          </div>
-        </div>
-        <div className="header-actions">
-          <a className="button button-secondary" href="#/admin">
-            Admin dashboard
-          </a>
-          <a className="button button-primary" href="#/">
-            Live map
-          </a>
-        </div>
-      </header>
+      <AdminHeader
+        title={requestId}
+        subtitle={
+          trip
+            ? `${trip.start_name || "--"} to ${trip.hospital_name || "--"} · ${formatDateTime(trip.dispatched_at)}`
+            : "Trip details"
+        }
+      />
 
       <main className="admin-content">
+        {/* Back to the trip list, top left where people look first. */}
+        <a className="button button-secondary trip-back" href="#/admin?s=trips">
+          ← All trips
+        </a>
         {error && <p className="admin-error">{error}</p>}
         {!trip && !error && <p className="admin-empty">Loading…</p>}
 
@@ -279,6 +274,36 @@ function TripDetail({ requestId }) {
                 sub={trip.route ? `Police ${trip.route.police_on_scene}/${trip.route.police_alerts} on scene` : null}
               />
             </div>
+
+            {trip.transport_seconds != null && (
+              <div className="admin-tiles">
+                <Fact
+                  label="108 ambulance"
+                  value={trip.unit_id ? `${trip.unit_id} (${trip.unit_kind})` : "--"}
+                  sub={trip.unit_id ? null : "Started with the patient on board"}
+                />
+                <Fact label="To the patient" value={formatDuration(trip.to_patient_seconds)} />
+                <Fact label="At the scene" value={formatDuration(trip.scene_seconds)} />
+                <Fact
+                  label="To hospital"
+                  value={formatDuration(trip.transport_seconds)}
+                  sub={trip.diverted ? "Diverted on the way" : null}
+                />
+                <Fact
+                  label="Handover"
+                  value={formatDuration(trip.handover_seconds)}
+                  sub={trip.pre_alerted ? "Pre-alerted: team waiting" : "Not pre-alerted"}
+                />
+                <Fact
+                  label="Dispatch to handover"
+                  value={formatDuration(
+                    (trip.to_patient_seconds || 0) + (trip.scene_seconds || 0)
+                    + trip.transport_seconds + (trip.handover_seconds || 0)
+                  )}
+                  sub="Then back in service"
+                />
+              </div>
+            )}
 
             <div className="trip-layout">
               <section className="admin-card">

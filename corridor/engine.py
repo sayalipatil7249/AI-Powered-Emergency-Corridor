@@ -72,6 +72,15 @@ ALWAYS_SWITCH_METERS = 60
 # Without a prediction: distance / this speed (m/s).
 FALLBACK_SPEED = 8.0
 
+# With other ambulances (corridor/referee.py): signals up to this far
+# ahead are claimed, so the referee knows who arrives when.
+CLAIM_METERS = 1500
+
+# Giving way: the ambulance is slowed so it reaches the stop line only
+# once the signal can turn green for it, and waits this far before it.
+GIVE_WAY_STOP_METERS = 10
+GIVE_WAY_CRAWL_SPEED = 0.5  # m/s, the slowest advised speed
+
 
 def transition_states(current, target_state):
     """
@@ -112,8 +121,25 @@ def _road_of(lane_id):
 class CorridorEngine:
     def __init__(self, ambulance, traffic, signals,
                  lookahead=CORRIDOR_LOOKAHEAD, clearance_predictor=None,
-                 timing="ai"):
+                 timing="ai", referee=None):
         self.ambulance = ambulance
+
+        # With several ambulances: the junction referee
+        # (corridor/referee.py) decides who may take over a signal.
+        # None: this engine is the only one and switches freely.
+        self.referee = referee
+
+        # The referee's give-way instruction for the junction ahead, and
+        # the speed this ambulance was slowed to (None: not slowed).
+        self.give_way = None
+        self.advised_speed = None
+
+        # (signal_id, links) -> (phase, emergency colours, colours shown)
+        self._targets = {}
+
+        # Junctions another ambulance cut in at: asked for again at once,
+        # so the queue that was draining through them keeps moving.
+        self._reclaim = set()
 
         # When the junction ahead switches: "ai" (AI clearance model,
         # the rule if none is trained), "rule" (green_lead_seconds), or
@@ -364,6 +390,7 @@ class CorridorEngine:
 
         # Signals the ambulance has passed go back to normal.
         ahead = {self._key(item) for item in upcoming}
+        self._reclaim &= ahead
         for passed in [
             key for key in list(self.switching) + list(self.held)
             if key not in ahead and key not in self.priority_requests
@@ -381,6 +408,10 @@ class CorridorEngine:
             self.next_timing = None
             for key in list(self.priority_requests):
                 self._release_request(key, "the ambulance has no signals ahead")
+            if self.referee is not None:
+                self.referee.keep_claims(self.ambulance.vehicle_id, set())
+                self.give_way = None
+                self._advise_speed(None)
             return
 
         nearest = upcoming[0]
@@ -429,7 +460,12 @@ class CorridorEngine:
         if stuck_in_queue:
             lead_source = "stuck in the queue"
 
-        started = key in self.switching or key in self.held
+        if self.referee is not None:
+            self._claim(upcoming, nearest, seconds_to_next, lead, stuck_in_queue)
+
+        started = (
+            key in self.switching or key in self.held or key in self._reclaim
+        )
         if started or (
             seconds_to_next <= lead
             or stuck_in_queue
@@ -444,12 +480,26 @@ class CorridorEngine:
             for item in cluster:
                 item_key = self._key(item)
                 if item_key not in self.switching and item_key not in self.held:
-                    self._start_switch(
+                    switched = self._start_switch(
                         item,
                         why if item is nearest else
                         f"Part of the same junction as {nearest['signal_id']}: "
                         "switching together.",
                     )
+                    # Giving way to another ambulance: the rest of the
+                    # junction waits too.
+                    if not switched:
+                        break
+
+        if self.referee is not None:
+            instruction = self.referee.current_instruction(self.ambulance.vehicle_id)
+            self.give_way = (
+                {**instruction, "distance_meters": round(nearest["distance"])}
+                if instruction
+                and instruction["signal_id"] in {item["signal_id"] for item in cluster}
+                else None
+            )
+            self._advise_speed(nearest["distance"] if self.give_way else None)
 
         # Keep every switched signal ahead moving on / held green.
         for switched in list(self.switching) + list(self.held):
@@ -464,7 +514,7 @@ class CorridorEngine:
             "lead_source": lead_source,
             "queued_cars": queued,
             "queued_ahead_per_lane": round(queued_ahead, 1),
-            "stage": self.stage(key),
+            "stage": "give_way" if self.give_way else self.stage(key),
             "switch_in_seconds": (
                 round(max(0.0, seconds_to_next - lead), 1)
                 if self.stage(key) == "normal" and lead != float("inf")
@@ -553,28 +603,59 @@ class CorridorEngine:
                     links.add(tls_index)
         return links
 
-    def _green_target(self, signal_id, tls_index):
+    def _green_target(self, signal_id, needed):
         """
-        What to show for the ambulance: (phase number, None) when one
-        phase of the normal program is green for its whole path through
-        the signal, otherwise (None, emergency colours): green for the
-        ambulance's links and for links green in every phase it needs,
-        red for everything else.
+        What to show for the ambulance's links `needed`: (phase number,
+        None) when one phase of the normal program gives its whole path
+        through the signal a protected green ("G"), otherwise (None,
+        emergency colours): green for the ambulance's links and for links
+        green in every phase it needs, red for everything else.
+
+        A movement that only ever gets a give-way green ("g", e.g. a turn
+        across oncoming traffic) is never served by a normal phase: the
+        oncoming traffic keeps its green and the ambulance has to wait
+        for a gap. It gets emergency colours instead, as real emergency
+        pre-emption does: green for every movement from the ambulance's
+        own approach road(s) - the cars queued in front of it may be
+        going elsewhere and must drive off - and red for all others.
         """
 
         phases = self.signals.phase_states(signal_id)
-        needed = self._ambulance_links(signal_id) | {tls_index}
 
         def green(state, index):
             return index < len(state) and state[index] in "Gg"
 
+        def protected(state, index):
+            return index < len(state) and state[index] == "G"
+
         for number, state in enumerate(phases):
-            if all(green(state, index) for index in needed):
+            if all(protected(state, index) for index in needed):
                 return number, None
 
         used = [state for state in phases if any(green(state, i) for i in needed)]
         if not used:
             return None, None
+
+        give_way_only = any(
+            not any(protected(state, index) for state in phases)
+            for index in needed
+        )
+
+        if give_way_only:
+            links = self.signals.controlled_links(signal_id)
+            approach = {
+                _road_of(link[0])
+                for index in needed
+                for link in links[index] if link
+            }
+            green_links = {
+                index for index, group in enumerate(links)
+                if any(link and _road_of(link[0]) in approach for link in group)
+            } | set(needed)
+            return None, "".join(
+                "G" if index in green_links else "r"
+                for index in range(len(used[0]))
+            )
 
         emergency = "".join(
             "G" if index in needed
@@ -584,6 +665,10 @@ class CorridorEngine:
         return None, emergency
 
     def _start_switch(self, junction, why):
+        """Start switching a junction for the ambulance. Returns False
+        when it cannot (no green phase, or giving way to another
+        ambulance)."""
+
         signal_id = junction["signal_id"]
         tls_index = junction["tls_index"]
         key = self._key(junction)
@@ -594,30 +679,47 @@ class CorridorEngine:
             for other_key, entry in list(other.items()):
                 if other_key[0] == signal_id and other_key != key:
                     other[key] = entry
-                    return
+                    return True
 
-        phase, emergency = self._green_target(signal_id, tls_index)
-        if phase is None and emergency is None:
+        needed = self._ambulance_links(signal_id) | {tls_index}
+        phase, emergency, target_state = self._target(signal_id, needed)
+        if target_state is None:
             logger.warning("No green phase for %s link %s.", signal_id, tls_index)
-            return
-
-        target_state = (
-            emergency if emergency else self.signals.phase_state(signal_id, phase)
-        )
-        current = self.signals.light_states(signal_id)
-        self.overridden_signals.add(signal_id)
+            return False
 
         hold = {"signal_id": signal_id, "phase": phase, "state": emergency}
+
+        if self.referee is not None:
+            decision = self.referee.acquire(
+                self.ambulance.vehicle_id, signal_id, needed, target_state,
+                self.now,
+            )
+            if decision == "wait":
+                return False
+            self._reclaim.discard(key)
+            if decision == "share":
+                # Another ambulance's green is green for this one too:
+                # ride along without touching the lights.
+                self.held[key] = {**hold, "shared": True}
+                self._event(
+                    "active", junction,
+                    "Signal already green for another ambulance on the "
+                    "same movement: sharing it.",
+                )
+                return True
+
+        current = self.signals.light_states(signal_id)
+        self.overridden_signals.add(signal_id)
 
         # Already green for the ambulance's whole path: keep it green.
         if all(
             index < len(current) and current[index] in "Gg"
-            for index in self._ambulance_links(signal_id) | {tls_index}
+            for index in needed
         ):
             self.held[key] = hold
             self._hold(hold)
             self._event("active", junction, f"{why} Already green; held.")
-            return
+            return True
 
         yellow, all_red = transition_states(current, target_state)
 
@@ -631,8 +733,96 @@ class CorridorEngine:
         self.signals.set_light_states(signal_id, yellow)
         logger.info("Switching %s for the ambulance: %s", signal_id, why)
         self._event("active", junction, why)
+        return True
+
+    def _target(self, signal_id, needed):
+        """(phase, emergency colours, colours shown) for the ambulance's
+        links `needed`; colours shown is None without a green phase."""
+
+        cache_key = (signal_id, frozenset(needed))
+        if cache_key not in self._targets:
+            phase, emergency = self._green_target(signal_id, needed)
+            if phase is None and emergency is None:
+                shown = None
+            else:
+                shown = emergency or self.signals.phase_state(signal_id, phase)
+            self._targets[cache_key] = (phase, emergency, shown)
+        return self._targets[cache_key]
+
+    def _claim(self, upcoming, nearest, seconds_to_next, lead, stuck):
+        """Tell the referee when this ambulance reaches the signals ahead
+        (stuck: held up by the queue before the nearest one, which only
+        its green can clear)."""
+
+        me = self.ambulance.vehicle_id
+        claimed = set()
+
+        for item in upcoming:
+            if item is not nearest and item["distance"] > CLAIM_METERS:
+                break
+            signal_id = item["signal_id"]
+            needed = self._ambulance_links(signal_id) | {item["tls_index"]}
+            _, _, shown = self._target(signal_id, needed)
+            if shown is None:
+                continue
+
+            if item is nearest:
+                arrival, item_lead = seconds_to_next, lead
+            else:
+                arrival = item["distance"] / FALLBACK_SPEED
+                item_lead = green_lead_seconds(self.traffic.road_halting_count(
+                    self.ambulance.route()[item["route_index"]]
+                ))
+            if item_lead == float("inf"):
+                item_lead = MAX_LEAD_SECONDS
+
+            self.referee.claim(me, {
+                "signal_id": signal_id,
+                "name": self.signals.name(
+                    signal_id, self.ambulance.route()[item["route_index"]]
+                ),
+                "links": needed,
+                "target": shown,
+                "arrival_seconds": round(arrival, 1),
+                "lead_seconds": round(item_lead, 1),
+                "distance_meters": round(item["distance"]),
+                "stuck": stuck and item is nearest,
+            }, self.now)
+            claimed.add(signal_id)
+
+        self.referee.keep_claims(me, claimed)
+
+    def _advise_speed(self, distance):
+        """Giving way: slow down to reach the stop line only when the
+        signal can turn green for this ambulance. distance None: drive
+        normally again."""
+
+        speed = None
+        if distance is not None and self.give_way is not None:
+            free_in = self.referee.free_in(
+                self.ambulance.vehicle_id, self.give_way["signal_id"]
+            )
+            if free_in > 0:
+                speed = max(
+                    GIVE_WAY_CRAWL_SPEED,
+                    (distance - GIVE_WAY_STOP_METERS) / free_in,
+                )
+                if speed >= self.ambulance.max_speed():
+                    speed = None
+
+        if speed is None and self.advised_speed is None:
+            return
+        if (
+            speed is not None and self.advised_speed is not None
+            and abs(speed - self.advised_speed) < 0.3
+        ):
+            return
+        self.advised_speed = speed
+        self.ambulance.advise_speed(speed)
 
     def _hold(self, hold):
+        if hold.get("shared"):
+            return  # another ambulance's engine controls these lights
         if hold["state"]:
             self.signals.set_light_states(hold["signal_id"], hold["state"])
         else:
@@ -641,6 +831,9 @@ class CorridorEngine:
     def _advance(self, key):
         """Move a switching junction on to all red and then green; keep
         held junctions green."""
+
+        if self._taken_over(key):
+            return
 
         if key in self.switching:
             switch = self.switching[key]
@@ -661,7 +854,43 @@ class CorridorEngine:
                 self.signals.set_light_states(switch["signal_id"], switch["red"])
 
         if key in self.held:
-            self._hold(self.held[key])
+            hold = self.held[key]
+            if (
+                hold.get("shared")
+                and self.referee.owner(hold["signal_id"]) == self.ambulance.vehicle_id
+            ):
+                # The ambulance whose green this one shared has passed:
+                # this engine now holds the signal itself.
+                hold["shared"] = False
+                self.overridden_signals.add(hold["signal_id"])
+            self._hold(hold)
+
+    def _taken_over(self, key):
+        """Another ambulance crossing first took this signal (the referee
+        let it cut in): stop holding it, leave its lights to that
+        ambulance, and ask for it again later."""
+
+        if self.referee is None:
+            return False
+        entry = self.held.get(key) or self.switching.get(key)
+        if entry is None or entry.get("shared"):
+            return False
+        signal_id = entry["signal_id"]
+        if self.referee.owner(signal_id) == self.ambulance.vehicle_id:
+            return False
+
+        for table in (self.held, self.switching):
+            for other_key in [k for k in table if k[0] == signal_id]:
+                del table[other_key]
+                self._reclaim.add(other_key)
+        self.overridden_signals.discard(signal_id)
+        self._event(
+            "restored",
+            {"signal_id": key[0], "route_index": key[1]},
+            "Another ambulance at the stop line crosses first; this signal "
+            "is asked for again when it has passed.",
+        )
+        return True
 
     def _restore_junction(self, key):
         held = self.held.pop(key, None)
@@ -673,8 +902,25 @@ class CorridorEngine:
         )
         if still_used:
             return
+        if self._give_back(key[0], shared=bool(held and held.get("shared"))):
+            return
         self._restore(key[0], held["phase"] if held else None)
         del switching
+
+    def _give_back(self, signal_id, shared=False):
+        """Tell the referee this ambulance is done with the signal.
+        True when the lights must be left alone: they belong to another
+        ambulance (shared, or handed over to one riding the same green)."""
+
+        if self.referee is None:
+            return False
+        owner = self.referee.owner(signal_id)
+        handed_over = self.referee.release(self.ambulance.vehicle_id, signal_id)
+        taken = owner is not None and owner != self.ambulance.vehicle_id
+        if shared or handed_over or taken:
+            self.overridden_signals.discard(signal_id)
+            return True
+        return False
 
     # -------------------------------------------------------------
     # Priority requests (extra early green further ahead)
@@ -808,14 +1054,25 @@ class CorridorEngine:
         held_phases = {
             hold["signal_id"]: hold.get("phase") for hold in self.held.values()
         }
+        shared = {
+            hold["signal_id"] for hold in self.held.values() if hold.get("shared")
+        }
+        for signal_id in shared:
+            self._give_back(signal_id, shared=True)
         for signal_id in list(self.overridden_signals):
-            self._restore(signal_id, held_phases.get(signal_id))
+            if not self._give_back(signal_id):
+                self._restore(signal_id, held_phases.get(signal_id))
 
         self.active_junction = None
         self.next_timing = None
         self.switching.clear()
         self.held.clear()
         self.priority_requests.clear()
+        self._targets.clear()
+        self._reclaim.clear()
+        if self.referee is not None:
+            self.give_way = None
+            self._advise_speed(None)
 
     def _restore(self, signal_id, held_phase=None):
         try:

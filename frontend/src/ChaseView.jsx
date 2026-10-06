@@ -14,13 +14,16 @@ import {
   POLICE_CLEARED_COLOR,
   policeUnitLabels,
   policeZones,
-  zoneSummary,
 } from "./policeZones";
 
 setWorkerUrl(maplibreWorkerUrl);
 
 // Free vector map with building footprints and heights (no key).
-const STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
+// Light or dark map to match the page theme (MapView remounts this view
+// when the theme changes).
+const isDark = () => document.documentElement.dataset.theme === "dark";
+const styleUrl = () =>
+  `https://tiles.openfreemap.org/styles/${isDark() ? "dark" : "positron"}`;
 
 const PUNE_CENTER = [73.859, 18.523]; // longitude, latitude
 
@@ -28,8 +31,8 @@ const STATUS_COLORS = {
   GREEN: "#22c55e",
   TURNING: "#84cc16",
   READY: "#f59e0b",
-  WAITING: "#64748b",
-  PASSED: "#334155",
+  WAITING: "#94a3b8",
+  PASSED: "#cbd5e1",
 };
 
 // Camera behind the ambulance, looking ahead along the road.
@@ -101,21 +104,25 @@ function vehiclesGeoJson(vehicles) {
         const [latitude, longitude] = vehicle.pulled_over
           ? kerbPosition(vehicle.latitude, vehicle.longitude, vehicle.heading)
           : [vehicle.latitude, vehicle.longitude];
+        const isAmbulance = vehicle.vehicle_id?.startsWith("ambulance");
         return {
           type: "Feature",
           geometry: {
             type: "Polygon",
             coordinates: [
-              footprint(latitude, longitude, vehicle.heading ?? 0, CAR),
+              footprint(latitude, longitude, vehicle.heading ?? 0, isAmbulance ? AMBULANCE : CAR),
             ],
           },
           properties: {
-            // Crashed cars (simulated accident) stand out in orange.
+            // Crashed cars (simulated accident) stand out in orange; other
+            // ambulances are near black; drivers pulled over for the siren pink.
             color: vehicle.vehicle_id?.startsWith("incident")
               ? CRASHED_CAR_COLOR
-              : vehicle.pulled_over
-                ? PULLED_OVER_COLOR
-                : carColor(vehicle.speed ?? 0),
+              : isAmbulance
+                ? (isDark() ? "#f8fafc" : "#0f172a")
+                : vehicle.pulled_over
+                  ? PULLED_OVER_COLOR
+                  : carColor(vehicle.speed ?? 0),
           },
         };
       }),
@@ -252,8 +259,8 @@ function policeZonesGeoJson(zones) {
       properties: {
         active: zone.active,
         label: zone.active
-          ? `Police directing traffic · ${zone.vehicles_waved} vehicles waved`
-          : `Cleared by police · ${zoneSummary(zone)}`,
+          ? "Police clearing traffic"
+          : "Cleared by police",
       },
     });
   }
@@ -365,7 +372,6 @@ function ambulanceGeoJson(ambulance) {
 
 function ambulancePointGeoJson(ambulance) {
   if (ambulance?.latitude == null) return EMPTY;
-  const speed = Math.round((ambulance.speed ?? 0) * 3.6);
   return {
     type: "FeatureCollection",
     features: [
@@ -378,8 +384,8 @@ function ambulancePointGeoJson(ambulance) {
         properties: {
           label:
             ambulance.status === "COMPLETED"
-              ? "Ambulance · arrived"
-              : `Ambulance · ${speed} km/h`,
+              ? "Ambulance arrived"
+              : "Ambulance",
         },
       },
     ],
@@ -476,7 +482,7 @@ function addLayers(map) {
     "source-layer": "building",
     minzoom: 14,
     paint: {
-      "fill-extrusion-color": "#1e2636",
+      "fill-extrusion-color": isDark() ? "#1e2636" : "#d6d9de",
       "fill-extrusion-height": ["coalesce", ["get", "render_height"], 9],
       "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
       "fill-extrusion-opacity": 0.9,
@@ -683,8 +689,8 @@ function addLayers(map) {
       "text-allow-overlap": true,
     },
     paint: {
-      "text-color": "#e6e9ef",
-      "text-halo-color": "#0a0f1a",
+      "text-color": isDark() ? "#e6e9ef" : "#111827",
+      "text-halo-color": isDark() ? "#0a0f1a" : "#ffffff",
       "text-halo-width": 2,
     },
   });
@@ -780,10 +786,17 @@ function ChaseView({
   // Next camera move sets the chase zoom and tilt (start / resume).
   const resetCamera = useRef(true);
 
+  // Redraw when the view changes size (e.g. the map is expanded).
+  useEffect(() => {
+    const observer = new ResizeObserver(() => mapRef.current?.resize());
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const map = new MapLibreMap({
       container: containerRef.current,
-      style: STYLE_URL,
+      style: styleUrl(),
       center: PUNE_CENTER,
       zoom: 15,
       pitch: CAMERA_PITCH,

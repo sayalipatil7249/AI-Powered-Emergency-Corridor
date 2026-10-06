@@ -11,6 +11,7 @@ from backend.models.emergency import Emergency
 from backend.models.traffic_signal import TrafficSignal
 from backend.models.police_station import PoliceStation
 from backend.models.police_call import PoliceCall
+from backend.models.priority_change import PriorityChange
 from backend.models.ambulance_request import AmbulanceRequest
 from backend.models.route_optimization_log import RouteOptimizationLog
 from backend.models.grievance import Grievance
@@ -26,7 +27,9 @@ from backend.api.routes.traffic_signal import router as traffic_signal_router
 from backend.api.routes.simulation import router as simulation_router
 from backend.api.routes.planning import router as planning_router
 from backend.api.routes.police import router as police_router
-from backend.api.routes.admin import router as admin_router
+from backend.api.routes.fleet import router as fleet_router
+from backend.api.routes.admin import complaints_router, router as admin_router
+from backend.api.routes.assistant import router as assistant_router
 from backend.mcp_server import mcp
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,7 +106,10 @@ app.include_router(traffic_signal_router) #add or look up a light, or change its
 app.include_router(simulation_router) #start or stop the pretend city, get its state, and the /ws walkie-talkie that sends live updates.
 app.include_router(planning_router) #find places, list hospitals and plan the fastest ambulance route.
 app.include_router(police_router) #police stations, their contact numbers, and the log of police calls.
+app.include_router(fleet_router) #more ambulances, each patient's priority (set by the crew), and the priority log.
+app.include_router(complaints_router) #'Report a problem': complaints from users, drivers, hospitals and police.
 app.include_router(admin_router) #admin dashboard: request KPIs, delay reasons, route performance and grievance tickets.
+app.include_router(assistant_router) #the "Ask" chat: questions about the live simulation, answered by Claude.
 
 # MCP server for AI agents at /mcp. Mounted last so it never hides the routes above.
 app.mount("/", mcp_app)

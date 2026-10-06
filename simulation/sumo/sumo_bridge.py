@@ -47,11 +47,26 @@ SUMO_NETWORK_DIR = os.path.join(
     PROJECT_ROOT, "simulation", "sumo", "pune_network_v2"
 )
 
-NET_FILE = os.path.join(
-    SUMO_NETWORK_DIR, "expanded_network", "expanded.net.xml.gz"
-)
+# The simulated area. "original" (default): 4.2 x 3.3 km of central
+# Pune, on which the AI models were trained; trips are short now that
+# patients go to the nearest suitable hospital, so it is big enough and
+# lighter to run. "2x": about 5.9 x 4.7 km (area_2x/, built from
+# OpenStreetMap on 2026-10-01); set SIM_AREA=2x in .env to use it.
+SIM_AREA = os.environ.get("SIM_AREA", "original")
 
-SCENARIO_DIR = os.path.join(SUMO_NETWORK_DIR, "scenarios")
+if SIM_AREA == "original":
+    NET_FILE = os.path.join(
+        SUMO_NETWORK_DIR, "expanded_network", "expanded.net.xml.gz"
+    )
+    SCENARIO_DIR = os.path.join(SUMO_NETWORK_DIR, "scenarios")
+    HOSPITALS_FILE = os.path.join(SUMO_NETWORK_DIR, "hospitals.json")
+    POLICE_FILE = os.path.join(SUMO_NETWORK_DIR, "police_stations.json")
+else:
+    AREA_DIR = os.path.join(SUMO_NETWORK_DIR, "area_2x")
+    NET_FILE = os.path.join(AREA_DIR, "area_2x.net.xml.gz")
+    SCENARIO_DIR = os.path.join(AREA_DIR, "scenarios")
+    HOSPITALS_FILE = os.path.join(AREA_DIR, "hospitals.json")
+    POLICE_FILE = os.path.join(AREA_DIR, "police_stations.json")
 
 # Demo traffic (patterns the AI never saw in training), one file per
 # level; live traffic picks the level. The ambulance is added at run time
@@ -63,6 +78,9 @@ TRAFFIC_FILES = {
 
 # The ambulance departs once the roads have filled up (simulated s).
 AMBULANCE_DEPART_TIME = 600
+
+# A car standing this long inside a junction no longer blocks others (s).
+JUNCTION_BLOCKER_SECONDS = 20
 
 # Pune driving profile for background traffic, and the ambulance type.
 VTYPES_FILE = os.path.join(SUMO_NETWORK_DIR, "pune_vtypes.add.xml")
@@ -125,6 +143,16 @@ def sumo_command(traffic_level="normal"):
         # Drivers re-route around jams, like using a navigation app.
         "--device.rerouting.probability", "0.5",
         "--device.rerouting.period", "60",
+        # Gridlock: cars that drove into a junction while their exit was
+        # full block everyone, the ambulance included. After this long
+        # others squeeze past them, as drivers do (otherwise SUMO waits
+        # 5 minutes and removes them). Tested on 8 heavy-traffic trips:
+        # the ambulance stood still inside junctions ~60% less.
+        "--ignore-junction-blocker", str(JUNCTION_BLOCKER_SECONDS),
+        # A collision (e.g. a car waved through a junction by police)
+        # only logs a warning; by default SUMO teleports the cars
+        # involved, which made an ambulance vanish mid-trip.
+        "--collision.action", "warn",
     ]
 
     # --start and --delay are SUMO-GUI options only.

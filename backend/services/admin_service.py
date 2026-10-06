@@ -49,12 +49,34 @@ TRAFFIC_SHARE = 0.4
 def ensure_schema():
     """Add columns introduced after ambulance_requests was first created
     (create_all makes new tables but never changes existing ones)."""
-    columns = {"route_geometry": "JSON", "track": "JSON", "plan_status": "VARCHAR(20)"}
+    columns = {
+        "route_geometry": "JSON", "track": "JSON",
+        # Why a trip has (or lacks) an AI planned time
+        "plan_status": "VARCHAR(20)",
+        # The 108 timeline
+        "unit_id": "VARCHAR(20)", "unit_kind": "VARCHAR(5)",
+        "to_patient_seconds": "FLOAT", "scene_seconds": "FLOAT",
+        "transport_seconds": "FLOAT", "handover_seconds": "FLOAT",
+        "pre_alerted": "BOOLEAN", "diverted": "BOOLEAN",
+    }
     with engine.begin() as connection:
         for column, kind in columns.items():
             connection.execute(text(
                 f"ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS {column} {kind}"
             ))
+        # PostGIS: every event with a position (stops, signals, police)
+        # as a map point, filled in from latitude / longitude by the
+        # database, with a spatial index (used by stuck_spots()).
+        connection.execute(text(
+            "ALTER TABLE trip_events ADD COLUMN IF NOT EXISTS location "
+            "geography(Point, 4326) GENERATED ALWAYS AS (CASE WHEN latitude IS NOT NULL "
+            "AND longitude IS NOT NULL THEN ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)"
+            "::geography END) STORED"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS trip_events_location_idx "
+            "ON trip_events USING GIST (location)"
+        ))
 
 
 def close_interrupted_requests():
@@ -87,8 +109,11 @@ def close_interrupted_requests():
 # Recording (called from the simulation thread)
 # -------------------------------------------------------------
 
-def new_request_id(now=None):
-    return f"REQ-{(now or datetime.now()).strftime('%Y%m%d-%H%M%S')}"
+def new_request_id(now=None, ambulance_number=None):
+    """e.g. "REQ-20261001-143005-A2": several ambulances can be
+    dispatched in the same second."""
+    request_id = f"REQ-{(now or datetime.now()).strftime('%Y%m%d-%H%M%S')}"
+    return f"{request_id}-A{ambulance_number}" if ambulance_number else request_id
 
 
 def start_request(request_id, ambulance_id, start_name, hospital_name,
@@ -140,9 +165,16 @@ def classify_delay(delay_seconds, stopped_seconds, reroutes, incidents):
     return "OTHER"
 
 
+# The 108 timeline columns (finish_request's timings).
+TIMING_FIELDS = (
+    "unit_id", "unit_kind", "to_patient_seconds", "scene_seconds",
+    "transport_seconds", "handover_seconds", "pre_alerted", "diverted",
+)
+
+
 def finish_request(request_id, status, response_seconds=None,
                    stopped_seconds=None, stops=None, route=None, notes=None,
-                   route_geometry=None, track=None, events=None):
+                   route_geometry=None, track=None, events=None, timings=None):
     """
     The trip ended. status: COMPLETED, CANCELLED or FAILED.
     route (completed trips): {"optimal_route_used", "signals_total",
@@ -150,6 +182,7 @@ def finish_request(request_id, status, response_seconds=None,
     "incidents"} for the route optimization log.
     route_geometry, track: for the trip page's map.
     events: [{"seconds", "kind", "title", ...TripEvent columns}], in order.
+    timings: the 108 timeline ({TIMING_FIELDS}).
     """
     db = SessionLocal()
     try:
@@ -169,6 +202,9 @@ def finish_request(request_id, status, response_seconds=None,
             row.route_geometry = route_geometry
         if track:
             row.track = track
+        for key, value in (timings or {}).items():
+            if key in TIMING_FIELDS:
+                setattr(row, key, round(value, 1) if isinstance(value, float) else value)
         for event in events or ():
             db.add(TripEvent(request_id=request_id, **_event_columns(event)))
 
@@ -267,6 +303,15 @@ def kpi_summary(db, days=None):
         func.avg(AmbulanceRequest.delay_seconds),
         func.avg(AmbulanceRequest.planned_seconds),
     ).one()
+    timeline = completed.with_entities(
+        func.avg(AmbulanceRequest.to_patient_seconds),
+        func.avg(AmbulanceRequest.scene_seconds),
+        func.avg(AmbulanceRequest.transport_seconds),
+        func.avg(AmbulanceRequest.handover_seconds),
+        func.count(AmbulanceRequest.pre_alerted),
+        func.count().filter(AmbulanceRequest.pre_alerted.is_(True)),
+        func.count().filter(AmbulanceRequest.diverted.is_(True)),
+    ).one()
     # On time is only known for trips with a planned time (delay set);
     # the others are counted separately, never as on time.
     with_plan = completed.filter(AmbulanceRequest.delay_seconds.isnot(None))
@@ -298,6 +343,13 @@ def kpi_summary(db, days=None):
         "avg_delay_seconds": rounded(averages[1]),
         "avg_planned_seconds": rounded(averages[2]),
         "open_grievances": open_grievances,
+        # The 108 timeline (trips recorded since it was added)
+        "avg_to_patient_seconds": rounded(timeline[0]),
+        "avg_scene_seconds": rounded(timeline[1]),
+        "avg_transport_seconds": rounded(timeline[2]),
+        "avg_handover_seconds": rounded(timeline[3]),
+        "pre_alert_rate": round(timeline[5] / timeline[4], 3) if timeline[4] else None,
+        "diverted": timeline[6],
     }
 
 
@@ -379,6 +431,7 @@ def request_dict(row, log=None):
         "stopped_seconds": row.stopped_seconds,
         "stops": row.stops,
         "notes": row.notes,
+        **{key: getattr(row, key) for key in TIMING_FIELDS},
         "route": None if log is None else {
             "optimal_route_used": log.optimal_route_used,
             "signals_total": log.signals_total,
@@ -475,6 +528,57 @@ def trip_detail(db, request_id):
     }
 
 
+# Stops closer together than this are one stuck spot (metres).
+STUCK_SPOT_METERS = 80
+
+
+def stuck_spots(db, days=None, limit=15):
+    """Where ambulances stood still, from the stops of completed trips:
+    PostGIS groups stops within STUCK_SPOT_METERS of each other (DBSCAN
+    in metres, UTM zone 43N) into spots, worst first:
+    [{"latitude", "longitude", "name", "stops", "trips", "stopped_seconds"}]."""
+
+    since = _since(days)
+    rows = db.execute(text(f"""
+        WITH stops AS (
+            SELECT e.request_id, e.location::geometry AS point,
+                   COALESCE(e.duration_seconds, 0) AS seconds,
+                   COALESCE(e.junction_name, e.road_name) AS name
+            FROM trip_events e
+            JOIN ambulance_requests r ON r.request_id = e.request_id
+            WHERE e.kind = 'STOP' AND e.location IS NOT NULL
+              AND r.status = 'COMPLETED'
+              {"AND r.dispatched_at >= :since" if since else ""}
+        ),
+        spots AS (
+            SELECT *, ST_ClusterDBSCAN(ST_Transform(point, 32643),
+                                       eps := :meters, minpoints := 1) OVER () AS spot
+            FROM stops
+        )
+        SELECT ST_Y(ST_Centroid(ST_Collect(point))) AS latitude,
+               ST_X(ST_Centroid(ST_Collect(point))) AS longitude,
+               mode() WITHIN GROUP (ORDER BY name) AS name,
+               COUNT(*) AS stops,
+               COUNT(DISTINCT request_id) AS trips,
+               SUM(seconds) AS stopped_seconds
+        FROM spots
+        GROUP BY spot
+        ORDER BY SUM(seconds) DESC
+        LIMIT :limit
+    """), {"since": since, "meters": STUCK_SPOT_METERS, "limit": limit}).mappings()
+    return [
+        {
+            "latitude": round(row["latitude"], 6),
+            "longitude": round(row["longitude"], 6),
+            "name": row["name"] or "Unnamed road",
+            "stops": row["stops"],
+            "trips": row["trips"],
+            "stopped_seconds": round(float(row["stopped_seconds"] or 0), 1),
+        }
+        for row in rows
+    ]
+
+
 def junction_report(db, days=None, limit=20):
     """Junctions where ambulances stood still, worst first (by total
     standing time): stops, trips affected, total / average / longest
@@ -552,8 +656,28 @@ def update_request(db, request_id, status=None, delay_reason=None, notes=None):
 # Grievances
 # -------------------------------------------------------------
 
-def grievance_dict(row):
+def trip_summaries(db, request_ids):
+    """{request id: {"start_name", "hospital_name", "ambulance_id",
+    "dispatched_at"}} for the trips that complaints are about."""
+    ids = {request_id for request_id in request_ids if request_id}
+    if not ids:
+        return {}
+    rows = db.query(AmbulanceRequest).filter(AmbulanceRequest.request_id.in_(ids)).all()
     return {
+        row.request_id: {
+            "start_name": row.start_name,
+            "hospital_name": row.hospital_name,
+            "ambulance_id": row.ambulance_id,
+            "dispatched_at": row.dispatched_at,
+        }
+        for row in rows
+    }
+
+
+def grievance_dict(row, trips=None):
+    """A complaint; trips (trip_summaries) adds the trip it is about."""
+    return {
+        "trip": (trips or {}).get(row.request_id),
         "id": row.id,
         "ticket_no": row.ticket_no,
         "request_id": row.request_id,
@@ -641,6 +765,36 @@ def create_grievance(db, raised_by_role, category, subject, priority="MEDIUM",
     db.commit()
     db.refresh(row)
     return row
+
+
+def auto_grievance(category, subject, description=None, request_id=None,
+                   priority="MEDIUM"):
+    """A ticket the app files itself (a hospital refused a patient, an
+    ambulance stuck, police late, a trip far later than planned), for
+    the admin to look into. Skipped if the same open ticket exists.
+    Called from the simulation thread; never raises."""
+    db = SessionLocal()
+    try:
+        exists = (
+            db.query(Grievance)
+            .filter(
+                Grievance.subject == subject[:200],
+                Grievance.request_id == request_id,
+                Grievance.status.in_(("OPEN", "IN_PROGRESS")),
+            )
+            .first()
+        )
+        if exists is None:
+            create_grievance(
+                db, "SYSTEM", category, subject, priority=priority,
+                raised_by_name="Automatic", description=description,
+                request_id=request_id,
+            )
+    except Exception as error:
+        db.rollback()
+        logger.warning("Could not file an automatic ticket: %s", error)
+    finally:
+        db.close()
 
 
 def update_grievance(db, grievance_id, status=None, priority=None,

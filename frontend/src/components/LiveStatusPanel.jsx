@@ -24,23 +24,20 @@ function LiveStatusPanel({
   const empty = !liveTraffic && !driving && agentFeed.length === 0;
 
   return (
-    <section className="panel-section live-status" aria-label="Live status">
-      <div className="section-heading">
-        <h2>Live status</h2>
-      </div>
+    <div className="live-status" aria-label="Live status">
 
       {onSimulateIncident && (
         <button
           className="button incident-button"
           onClick={onSimulateIncident}
           disabled={incidentBusy || !driving}
-          title="Block a road without signals ahead of the ambulance, to see the police alert, the phone call and the police clearing it"
+          title="Test: block a road ahead and watch the police clear it"
         >
           {incidentBusy
             ? "Blocking a road…"
             : driving
-              ? "⚠ Simulate accident ahead"
-              : "⚠ Accident: after the ambulance sets off"}
+              ? "⚠ Test: accident ahead"
+              : "⚠ Test accident (once the ambulance is driving)"}
         </button>
       )}
 
@@ -60,11 +57,10 @@ function LiveStatusPanel({
 
       {empty && (
         <p className="live-status-empty muted">
-          Live traffic, police alerts and AI agent messages appear here
-          once the simulation is running.
+          Traffic, police and other updates show here once you press Start.
         </p>
       )}
-    </section>
+    </div>
   );
 }
 

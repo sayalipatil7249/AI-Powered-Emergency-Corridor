@@ -18,6 +18,9 @@ router = APIRouter(
     tags=["Admin dashboard"],
 )
 
+# Complaints raised by people (not the admin): POST /complaints.
+complaints_router = APIRouter(prefix="/complaints", tags=["Complaints"])
+
 
 def get_db():
     db = SessionLocal()
@@ -115,6 +118,16 @@ def get_request_detail(request_id: str, db: Session = Depends(get_db)):
 
 
 # Junctions where ambulances stood still most (total standing time)
+@router.get("/stuck-spots")
+def get_stuck_spots(
+    days: int | None = Days,
+    limit: int = Query(15, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Where ambulances stood still: nearby stops grouped by PostGIS."""
+    return admin_service.stuck_spots(db, days, limit)
+
+
 @router.get("/junctions")
 def get_problem_junctions(
     days: int | None = Days,
@@ -147,9 +160,11 @@ def get_grievances(
     search: str | None = None,
     db: Session = Depends(get_db),
 ):
+    rows = admin_service.list_grievances(db, status, category, priority, search)
+    trips = admin_service.trip_summaries(db, [row.request_id for row in rows])
     return [
-        admin_service.grievance_dict(row)
-        for row in admin_service.list_grievances(db, status, category, priority, search)
+        admin_service.grievance_dict(row, trips)
+        for row in rows
     ]
 
 
@@ -166,10 +181,39 @@ def post_grievance(ticket: GrievanceCreate, db: Session = Depends(get_db)):
         row = admin_service.create_grievance(db, **ticket.model_dump())
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error))
-    return admin_service.grievance_dict(row)
+    return admin_service.grievance_dict(row, admin_service.trip_summaries(db, [row.request_id]))
 
 
 # Move a ticket on (status, priority, category, resolution note)
+# Who can report with "Report a problem": the ambulance crew using the
+# app, and the 108 control room, hospitals and police they work with
+# (SYSTEM is the app itself).
+PUBLIC_ROLES = ("DRIVER", "CALL_CENTRE", "HOSPITAL", "POLICE")
+
+
+class ProblemReport(BaseModel):
+    raised_by_role: str
+    category: str
+    subject: str
+    raised_by_name: str | None = None
+    description: str | None = None
+    request_id: str | None = None
+
+
+@complaints_router.post("", status_code=201)
+def report_problem(report: ProblemReport, db: Session = Depends(get_db)):
+    """'Report a problem' on the main screen: the ambulance crew (or the
+    108 control room, a hospital, the police) raises a ticket; the admin
+    handles it on the Admin page."""
+    if report.raised_by_role not in PUBLIC_ROLES:
+        raise HTTPException(status_code=400, detail="Choose who you are.")
+    try:
+        row = admin_service.create_grievance(db, **report.model_dump())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return admin_service.grievance_dict(row, admin_service.trip_summaries(db, [row.request_id]))
+
+
 @router.patch("/grievances/{grievance_id}")
 def patch_grievance(grievance_id: int, update: GrievanceUpdate, db: Session = Depends(get_db)):
     try:
@@ -178,4 +222,4 @@ def patch_grievance(grievance_id: int, update: GrievanceUpdate, db: Session = De
         raise HTTPException(status_code=422, detail=str(error))
     if row is None:
         raise HTTPException(status_code=404, detail="Grievance not found")
-    return admin_service.grievance_dict(row)
+    return admin_service.grievance_dict(row, admin_service.trip_summaries(db, [row.request_id]))

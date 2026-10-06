@@ -24,7 +24,7 @@ export function RouteSummary({ summary }) {
   if (!summary || !summary.trips) {
     return (
       <section className="admin-card">
-        <h2>Fast response measures</h2>
+        <h2>Signals and police</h2>
         <p className="admin-empty">
           No completed trips yet. Run a trip on the live map: every trip is
           recorded here when the ambulance arrives.
@@ -35,32 +35,9 @@ export function RouteSummary({ summary }) {
 
   return (
     <section className="admin-card">
-      <h2>Fast response measures</h2>
-      <p className="muted">{summary.trips} completed trips with a route log</p>
+      <h2>Signals and police</h2>
+      <p className="muted">Over {summary.trips} completed trips</p>
       <div className="admin-shares">
-        <Share
-          label="Fast arrivals"
-          part={summary.fast_arrivals}
-          whole={summary.trips_with_plan}
-          note={
-            `${summary.fast_arrivals} of ${summary.trips_with_plan} planned trips on or ahead of plan` +
-            (summary.trips > summary.trips_with_plan
-              ? ` · ${summary.trips - summary.trips_with_plan} without a plan left out`
-              : "")
-          }
-        />
-        <Share
-          label="Optimal route kept"
-          part={summary.optimal_route_used}
-          whole={summary.trips}
-          note={`${summary.optimal_route_used} of ${summary.trips} trips without re-routing`}
-        />
-        <Share
-          label="Full corridor cleared"
-          part={summary.corridor_cleared}
-          whole={summary.trips}
-          note={`${summary.corridor_cleared} of ${summary.trips} trips with every signal turned green`}
-        />
         <Share
           label="Signals turned green"
           part={summary.signals_cleared}
@@ -96,10 +73,10 @@ export function RequestsTable({ requests, delayReasons, onChangeReason, busyId }
     <section className="admin-card">
       <div className="admin-card-heading">
         <div>
-          <h2>Request &amp; route log</h2>
+          <h2>Trip log</h2>
           <p className="muted">
-            Newest first · open a request for its map and timeline · the delay
-            reason can be corrected
+            Newest first · click a trip for its map and timeline · scroll for
+            older trips
           </p>
         </div>
         <label className="admin-check">
@@ -115,7 +92,7 @@ export function RequestsTable({ requests, delayReasons, onChangeReason, busyId }
       {rows.length === 0 ? (
         <p className="admin-empty">No requests to show.</p>
       ) : (
-        <div className="admin-table-wrap">
+        <div className="admin-table-wrap admin-table-scroll">
           <table className="admin-table">
             <thead>
               <tr>

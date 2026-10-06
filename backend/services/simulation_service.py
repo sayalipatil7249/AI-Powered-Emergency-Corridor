@@ -23,19 +23,17 @@ from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass
 
-from ai import deadlock, pretrip
 from ai.clearance import clearance_predictor
+from ai.features import formula_travel_time, route_position
 from ai.pretrip import TRAFFIC_LEVELS
-from ai.eta_model import estimate as estimate_eta
-from ai.features import RouteCache
-from corridor import feed
-from corridor.engine import CorridorEngine
+from corridor import feed, priority
+from corridor import dispatch, hospital_care
+from corridor.hospital_care import HospitalBoard
 from corridor.police_board import PoliceBoard
-from corridor.police_watch import SignallessWatch
-from corridor.response import DeadlockResponse
-from backend.services import admin_service
+from corridor.referee import JunctionReferee
+from backend.services import admin_service, priority_log
+from backend.services.ambulance_run import AmbulanceRun
 from backend.services.police_notifier import police_notifier
-from backend.services.trip_recorder import TripRecorder
 from simulation import live_traffic
 from simulation.sumo import route_planner
 from simulation.sumo.adapters import (
@@ -59,7 +57,13 @@ from simulation.sumo.sumo_bridge import (
 
 logger = logging.getLogger(__name__)
 
-AMBULANCE_ID = "ambulance_01"
+# Ambulances on the road at once (the first one plus those added).
+MAX_AMBULANCES = 10
+
+# Demo "crossing ambulance": it is sent towards a signal the first
+# ambulance reaches in this many seconds (enough time to see it coming).
+CROSSING_MIN_SECONDS = 45
+CROSSING_MAX_SECONDS = 240
 
 # Drivers ahead of the ambulance and police cars make room for the
 # siren (SumoGiveWay). GIVE_WAY=0 in .env switches it off.
@@ -68,6 +72,10 @@ GIVE_WAY = os.environ.get("GIVE_WAY", "1") != "0"
 # Keep showing the finished trip this long (simulated seconds),
 # then stop the simulation automatically.
 STOP_AFTER_ARRIVAL_SECONDS = 30
+
+# A returning 108 ambulance off the road this long without arriving is
+# put back at its station (s).
+UNIT_MISSING_SECONDS = 300
 
 # Playback speed while the ambulance drives: simulated seconds per real
 # second (1 = real time). Warm-up always runs at full speed.
@@ -80,18 +88,22 @@ LIVE_REFRESH_SECONDS = 600
 
 @dataclass
 class LiveContext:
-    """What a function passed to run_in_simulation() can use."""
+    """What a function passed to run_in_simulation() can use. ambulance,
+    engine, route_cache, response and police_watch are the first
+    ambulance's; runs holds every ambulance (AmbulanceRun)."""
 
     now: float
     phase: str  # "warming_up", "driving" or "arrived"
     ambulance: object
     traffic: object
     signals: object
-    engine: CorridorEngine
+    engine: object  # corridor.engine.CorridorEngine
     route_cache: object  # ai.features.RouteCache, None before departure
     response: object = None  # corridor/response.py, None before departure
     police_watch: object = None  # corridor/police_watch.py, None before departure
     incidents: object = None     # simulated accidents (SumoIncidents)
+    runs: list = None            # every ambulance (AmbulanceRun), first one first
+    referee: object = None       # corridor/referee.py
 
 
 class SimulationNotRunning(RuntimeError):
@@ -145,6 +157,10 @@ def _state(status, **values):
         "police_board": None,
         "incidents": [],
         "give_way": None,
+        "ambulances": [],
+        "ambulance_details": {},
+        "referee": None,
+        "units": [],
         **values,
     }
 
@@ -160,18 +176,33 @@ class SimulationService:
         # Messages from the AI agent, shown on the dashboard.
         self.agent_feed = deque(maxlen=30)
 
-        # Where the ambulance goes (set by start()).
+        # Where the first ambulance goes, and its patient's condition
+        # (set by start()).
         self.trip = demo_trip()
+        self.condition = priority.DEFAULT_CONDITION
+        self.extra = []  # booked ambulances [(trip, condition)]
+
+        # Every ambulance of the current run (AmbulanceRun), first one
+        # first; only changed inside the simulation thread.
+        self.runs = []
+        self._fleet = None  # what a new AmbulanceRun needs (set by _drive)
+        self._run_id = None
+
+        # Priority settings of this run, newest last (also saved in the
+        # priority_changes table).
+        self.priority_changes = deque(maxlen=100)
+
+        # What each hospital can take in this run (cath lab, ICU beds,
+        # trauma team...; corridor/hospital_care.py): each ambulance
+        # holds what its patient needs.
+        self.hospital_board = HospitalBoard()
+
+        # Where each 108 ambulance is and what it is doing
+        # (corridor/dispatch.py), during a run.
+        self.units = dispatch.UnitBoard()
+        self._return_trips = 0
 
         self.playback_speed = DEFAULT_PLAYBACK_SPEED
-
-        # The running trip's request in the admin log (admin_service):
-        # its id until it arrives, and the police alerts / officers on
-        # scene during it.
-        self._open_request = None
-        self._recorder = None      # what happens on the trip (trip_recorder.py)
-        self._trip_alerts = set()
-        self._trip_police_on_scene = set()
 
         # Live traffic (digital twin), when a TomTom key is configured.
         self.live_info = None
@@ -183,12 +214,24 @@ class SimulationService:
     # Controls used by the API
     # -------------------------------------------------------------
 
-    def start(self, trip=None):
+    def start(self, trip=None, condition=None, extra=()):
         """
         Start the simulation in a background thread. trip: {"roads",
         "depart_position", "arrival_position", "start_name",
         "hospital_name"} from the route planner; default: the demo trip.
+        condition: the patient's condition set by the dispatcher
+        (corridor/priority.py); default DEFAULT_CONDITION.
+        extra: more booked ambulances [(trip, condition)], setting off
+        together with the first one.
         """
+
+        condition = priority.check_condition(condition or priority.DEFAULT_CONDITION)
+        extra = [
+            (extra_trip, priority.check_condition(extra_condition or priority.DEFAULT_CONDITION))
+            for extra_trip, extra_condition in extra
+        ]
+        if 1 + len(extra) > MAX_AMBULANCES:
+            raise ValueError(f"At most {MAX_AMBULANCES} ambulances at once in this demo.")
 
         if self.running:
             return {"status": "already_running"}
@@ -198,6 +241,13 @@ class SimulationService:
             return {"status": "stopping"}
 
         self.trip = trip or demo_trip()
+        self.condition = condition
+        self.extra = extra
+        self.runs = []
+        self._fleet = None
+        self.priority_changes.clear()
+        self.hospital_board.reset()
+        self.units.reset(dispatch.units(route_planner.hospitals()))
         self.live_info = None
         self._pending_snapshot = None
         self._road_cache = {}
@@ -250,29 +300,487 @@ class SimulationService:
                 "hospital_name": self.trip["hospital_name"],
                 "start_point": self.trip.get("start_point"),
                 "hospital_point": self.trip.get("hospital_point"),
+                "pickup_point": (
+                    [self.trip["pickup"]["latitude"], self.trip["pickup"]["longitude"]]
+                    if self.trip.get("pickup") else None
+                ),
+                "base_name": (self.trip.get("base") or {}).get("name"),
                 "police_along_route": self.trip.get("police_along_route", []),
             },
             "live_traffic": self.live_info,
             "playback_speed": self.playback_speed,
+            "priority_changes": list(self.priority_changes),
+            "max_ambulances": MAX_AMBULANCES,
+            "units": self.unit_summary(),
         }
+
+    # -------------------------------------------------------------
+    # Several ambulances and their patients' priority
+    # -------------------------------------------------------------
+
+    def add_ambulance(self, trip, condition=None):
+        """
+        Send another ambulance while the simulation runs. trip: like
+        start()'s. During warm-up it sets off with the first ambulance,
+        otherwise at once.
+        """
+
+        condition = priority.check_condition(condition or priority.DEFAULT_CONDITION)
+
+        def act(context):
+            if len(context.runs) >= MAX_AMBULANCES:
+                raise ValueError(
+                    f"At most {MAX_AMBULANCES} ambulances at once in this demo."
+                )
+            if context.phase == "arrived":
+                raise ValueError(
+                    "The trip has finished. Start a new simulation first."
+                )
+            dispatch_at = max(AMBULANCE_DEPART_TIME, context.now + 1)
+            profiles = []
+            for active in context.runs:
+                if active.phase == "arrived":
+                    continue
+                remaining = dict(active.trip)
+                offset = max(0, active.dispatch_at - dispatch_at)
+                if active.phase == "driving":
+                    index, position = route_position(active.ambulance)
+                    remaining['roads'] = active.ambulance.route()[index:]
+                    remaining['depart_position'] = position
+                profile = route_planner.corridor_profile(remaining, offset)
+                profiles.append({**profile, 'label': active.label,
+                                 'weight': priority.weight(active.condition, active._stood_still())})
+            coordinated, _ = route_planner.coordinate_trip(
+                trip, condition, profiles, f"Ambulance {len(context.runs) + 1}"
+            )
+            run = self._new_run(coordinated, condition, dispatch_at, context.now)
+            return run.summary()
+
+        added = self.run_in_simulation(act)
+        changed = (added.get("routing_decision") or {}).get("changed")
+        self.add_agent_message(
+            f"{added['label']} sent"
+            + (f" ({added['level_name']})" if added.get("level_name") else "")
+            + f": {trip['start_name']} → "
+            f"{trip['hospital_name']}." + (" Took another road to avoid other ambulances." if changed else ""),
+            kind="priority",
+        )
+        return added
+
+    def add_crossing_ambulance(self, condition=None):
+        """
+        Demo: another ambulance that reaches one of the first ambulance's
+        next signals from a side road at about the same time, so the two
+        need the same junction and the referee has to decide.
+        """
+
+        condition = priority.check_condition(condition or "stable")
+
+        def junctions_ahead(context):
+            first = context.runs[0]
+            if first.phase != "driving":
+                raise ValueError(
+                    "The crossing ambulance can be sent once the first "
+                    "ambulance is driving."
+                )
+            route = first.ambulance.route()
+            route_index, lane_position = route_position(first.ambulance)
+            candidates = []
+            for junction in first.engine.upcoming_signals():
+                seconds = formula_travel_time(
+                    first.route_cache, route_index, lane_position,
+                    junction["route_index"],
+                )
+                if CROSSING_MIN_SECONDS <= seconds <= CROSSING_MAX_SECONDS:
+                    candidates.append((
+                        junction["signal_id"], route[junction["route_index"]],
+                        seconds,
+                    ))
+            return candidates
+
+        candidates = self.run_in_simulation(junctions_ahead)
+
+        # Planned outside the simulation thread (takes about a second).
+        for signal_id, in_road, seconds in candidates:
+            trip = route_planner.crossing_trip(signal_id, in_road, seconds)
+            if trip is not None:
+                return self.add_ambulance(trip, condition)
+
+        raise ValueError(
+            "No side road found to cross the first ambulance's route in the "
+            "next few minutes. Try again in a moment."
+        )
+
+    def set_condition(self, vehicle_id, condition, changed_by=None, source="crew"):
+        """The crew sets their patient's condition: applies at once,
+        logged in priority_changes. source "admin": the control room
+        overrides it (also applied at once and logged)."""
+
+        if source not in ("crew", "admin"):
+            raise ValueError("source must be 'crew' or 'admin'.")
+
+        condition = priority.check_condition(condition)
+
+        def act(context):
+            run = next(
+                (run for run in context.runs if run.vehicle_id == vehicle_id),
+                None,
+            )
+            if run is None:
+                raise LookupError(f"No ambulance {vehicle_id} in this run.")
+            if run.phase == "arrived":
+                raise ValueError(f"{run.label} has already arrived.")
+            previous = run.condition
+            if previous == condition:
+                return run.summary()
+            run.set_condition(condition)
+            self._log_priority(run, source, context.now, previous, changed_by)
+            # Does the hospital still suit the patient? (e.g. chest pain
+            # became a heart attack: it needs a cath lab now)
+            if hospital_care.need(previous) != hospital_care.need(condition) or not (
+                hospital_care.can_treat(run.trip["hospital_name"], condition)
+            ):
+                run.pending_check = "condition"
+            return run.summary()
+
+        before = {
+            item["vehicle_id"]: item for item in self.latest_state.get("ambulances", [])
+        }.get(vehicle_id)
+        result = self.run_in_simulation(act)
+        if before is None or before["condition"] != condition:
+            who = "control room" if source == "admin" else "crew"
+            self.add_agent_message(
+                f"{result['label']}: patient is now {result['level_name']} "
+                f"({result['condition_label'].lower()}). Changed by the {who}.",
+                kind="priority",
+            )
+        return result
+
+    def _new_run(self, trip, condition, dispatch_at, now):
+        """Create an ambulance (inside the simulation thread)."""
+
+        traffic, signals, referee, clearance, level_index = self._fleet
+        run = AmbulanceRun(
+            number=len(self.runs) + 1,
+            trip=trip,
+            condition=condition,
+            dispatch_at=dispatch_at,
+            traffic=traffic,
+            signals=signals,
+            referee=referee,
+            clearance=clearance,
+            level_index=level_index,
+            on_police_alert=self._on_police_alert,
+            add_message=self.add_agent_message,
+            check_hospital=self._check_hospital,
+        )
+        self.runs.append(run)
+        self.hospital_board.hold(run.vehicle_id, trip["hospital_name"], condition)
+        self._assign_unit(run)
+        self._log_priority(run, "dispatch", now)
+        return run
+
+    def busy_units(self):
+        """108 ambulances that can't take a new call right now."""
+        return self.units.busy() if self.running else set()
+
+    def unit_fleet(self):
+        """The 108 fleet for dispatch: during a run where each ambulance
+        is now (a returning one can take a call from where it is),
+        otherwise all at their stations."""
+        if self.running and self.units.units:
+            return self.units.fleet()
+        return dispatch.units(route_planner.hospitals())
+
+    def unit_summary(self):
+        if self.running and self.units.units:
+            return self.units.summary()
+        return [
+            {**unit, "status": "available", "ambulance": None,
+             "kind_label": dispatch.KIND_LABELS[unit["kind"]],
+             "status_label": dispatch.STATUS_LABELS["available"]}
+            for unit in dispatch.units(route_planner.hospitals())
+        ]
+
+    def _assign_unit(self, run):
+        """The 108 ambulance named in run's trip goes on this call (inside
+        the simulation thread). A returning one leaves its way home."""
+        unit = self.units.units.get((run.trip.get("unit") or {}).get("id"))
+        if unit is None:
+            return
+        if unit["vehicle_id"]:
+            try:
+                import traci
+                traci.vehicle.remove(unit["vehicle_id"])
+            except Exception:
+                pass
+            self.add_agent_message(
+                f"{unit['id']} was driving back. It now goes to {run.label}'s patient.",
+                kind="hospital",
+            )
+        unit.update(status="on_call", ambulance=run.vehicle_id,
+                    vehicle_id=None, missing_since=None)
+
+    def _step_units(self, now):
+        """Follow the 108 ambulances after their patients: handover at the
+        hospital, then back in service, driving back to their station."""
+        for run in self.runs:
+            unit = self.units.units.get((run.trip.get("unit") or {}).get("id"))
+            if unit is None or unit["ambulance"] != run.vehicle_id:
+                continue
+            if run.phase == "driving" and run.snapshot:
+                unit["latitude"] = run.snapshot.get("latitude", unit["latitude"])
+                unit["longitude"] = run.snapshot.get("longitude", unit["longitude"])
+            elif run.phase == "arrived":
+                if unit["status"] == "on_call":
+                    unit["status"] = "handover"
+                    unit["latitude"], unit["longitude"] = run.trip["hospital_point"]
+                if unit["status"] == "handover" and now >= run.handover_done_at:
+                    self._send_home(unit, run)
+
+        for unit in self.units.units.values():
+            if unit["status"] != "returning" or not unit["vehicle_id"]:
+                continue
+            tracker = SumoAmbulanceTracker(unit["vehicle_id"])
+            if tracker.is_on_road():
+                unit["missing_since"] = None
+                position = tracker.position()
+                unit["latitude"], unit["longitude"] = position["latitude"], position["longitude"]
+            elif tracker.has_arrived() or now - (unit["missing_since"] or now) > UNIT_MISSING_SECONDS:
+                self._unit_home(unit)
+            elif unit["missing_since"] is None:
+                unit["missing_since"] = now  # teleported past a jam
+
+    def _send_home(self, unit, run):
+        """Handover done: the ambulance is back in service and drives to
+        its station (free for a new call on the way)."""
+        run.service_stage = "returning"
+        latitude, longitude = run.trip["hospital_point"]
+        try:
+            plan = route_planner.plan_route(
+                latitude, longitude, unit["station_latitude"], unit["station_longitude"],
+                unit["station"],
+            )
+        except route_planner.PlanningError:
+            plan = None
+        if plan is None or len(plan["roads"]) < 2:
+            # Its station is this hospital (or no way back): back at once.
+            self._unit_home(unit)
+            return
+        self._return_trips += 1
+        vehicle_id = f"ambulance_return_{self._return_trips}"
+        try:
+            SumoAmbulanceTracker(vehicle_id).dispatch(
+                plan["roads"], plan["depart_position"], plan["arrival_position"]
+            )
+        except Exception:
+            logger.exception("Could not send %s back to its station", unit["id"])
+            self._unit_home(unit)
+            return
+        unit.update(status="returning", vehicle_id=vehicle_id, missing_since=None)
+        self.add_agent_message(
+            f"{unit['id']} left the patient at {run.trip['hospital_name']}. "
+            f"Free again, driving back to {unit['station']}.",
+            kind="hospital",
+        )
+
+    def _unit_home(self, unit):
+        run = next((item for item in self.runs if item.vehicle_id == unit["ambulance"]), None)
+        if run is not None:
+            run.service_stage = "available"
+        was_returning = unit["status"] == "returning"
+        self.units.at_station(unit)
+        if was_returning:
+            self.add_agent_message(f"{unit['id']} back at {unit['station']}.", kind="hospital")
+
+    def _fleet_busy(self, now):
+        """A handover or a drive back to the station still going on."""
+        return any(
+            run.handover_done_at is not None and now < run.handover_done_at
+            for run in self.runs
+        ) or any(unit["status"] in ("handover", "returning") for unit in self.units.units.values())
+
+    # One manual police call per ambulance at most this often (s).
+    POLICE_CALL_COOLDOWN = 120
+
+    def call_police(self, vehicle_id, called_by="crew"):
+        """The crew (or the control room) says the ambulance is stuck:
+        call the police station that can reach the front of the queue
+        fastest, now. Only while driving, at most once every
+        POLICE_CALL_COOLDOWN seconds per ambulance; the phone call itself
+        counts towards the per-trip call limit (police_notifier)."""
+
+        def act(context):
+            run = next((item for item in context.runs if item.vehicle_id == vehicle_id), None)
+            if run is None:
+                raise LookupError(f"No ambulance {vehicle_id} in this run.")
+            if run.phase != "driving" or run.police_watch is None:
+                raise ValueError(f"{run.label} is not driving, so there is nothing to clear.")
+            if run.at_patient:
+                raise ValueError(f"{run.label} is at the patient, not stuck.")
+            last = getattr(run, "police_called_at", None)
+            if last is not None and context.now - last < self.POLICE_CALL_COOLDOWN:
+                wait = round(self.POLICE_CALL_COOLDOWN - (context.now - last))
+                raise ValueError(f"Police were just called for {run.label}. Try again in {wait} s.")
+            result = run.police_watch.call_police(context.now, called_by)
+            if result["called"]:
+                run.police_called_at = context.now
+                snapshot = run.snapshot or {}
+                run.record_event(
+                    context.now, "POLICE", f"Police called by the {called_by}",
+                    detail=result["message"],
+                    latitude=snapshot.get("latitude"), longitude=snapshot.get("longitude"),
+                )
+            return {**result, "label": run.label}
+
+        result = self.run_in_simulation(act)
+        if result["called"]:
+            who = "control room" if called_by == "control room" else "crew"
+            self.add_agent_message(f"{result['label']} ({who}): {result['message']}", kind="police")
+        return result
+
+    def hospital_declines(self, vehicle_id):
+        """Test tool: the hospital this ambulance is going to can't take
+        its patient any more (e.g. its cath lab just became busy). The
+        call centre finds another one and the ambulance is diverted."""
+
+        def act(context):
+            run = next((item for item in context.runs if item.vehicle_id == vehicle_id), None)
+            if run is None:
+                raise LookupError(f"No ambulance {vehicle_id} in this run.")
+            if run.phase == "arrived":
+                raise ValueError(f"{run.label} has already arrived.")
+            self.hospital_board.close(
+                run.trip["hospital_name"], hospital_care.need(run.condition)
+            )
+            run.pending_check = "declined"
+            return run.summary()
+
+        return self.run_in_simulation(act)
+
+    # Hospitals compared by live driving time when diverting.
+    DIVERT_CANDIDATES = 4
+
+    def _check_hospital(self, run, now, why):
+        """
+        The 108 call centre checks the ambulance's hospital can take the
+        patient: on the pre-alert (why="pre_alert", once the patient is
+        on board), when the crew changes the condition ("condition"), or
+        when the hospital says it can't ("declined"). If it can't, the
+        nearest hospital that can (by live driving time) is found and
+        the ambulance diverted at once, instead of finding out at the door.
+        """
+
+        board = self.hospital_board
+        name = run.trip["hospital_name"]
+        resource = hospital_care.need(run.condition)
+        need_label = hospital_care.RESOURCES[resource]
+        if board.accepts(name, run.condition, holder=run.vehicle_id):
+            board.hold(run.vehicle_id, name, run.condition)
+            if why == "pre_alert" or run.pre_alert is None or (
+                run.pre_alert["hospital"], run.pre_alert["need_label"]
+            ) != (name, need_label):
+                run.pre_alert = {"hospital": name, "need_label": need_label, "status": "ready"}
+                eta = (run.snapshot or {}).get("eta_seconds")
+                self.add_agent_message(
+                    f"Told {name} that {run.label} is coming"
+                    + (f" (about {max(1, round(eta / 60))} min)" if eta else "")
+                    + f". {need_label} is ready.",
+                    kind="hospital",
+                )
+                run.record_event(
+                    now, "PRE_ALERT", f"Hospital pre-alerted: {name}",
+                    detail=f"{need_label} ready on arrival",
+                )
+            return
+
+        if not hospital_care.can_treat(name, run.condition):
+            problem = f"can't treat {priority.CONDITIONS[run.condition][0].lower()}"
+        else:
+            problem = f"has no {need_label.lower()} free"
+
+        if run.phase != "driving" or run.on_junction():
+            run.pending_check = why  # try again once on a normal road
+            return
+
+        position = run.snapshot or {}
+        latitude, longitude = position.get("latitude"), position.get("longitude")
+        candidates = [
+            item for item in route_planner.hospitals()
+            if item["name"] != name
+            and board.accepts(item["name"], run.condition, holder=run.vehicle_id)
+        ]
+        if latitude is not None:
+            candidates.sort(key=lambda item: (item["latitude"] - latitude) ** 2
+                            + (item["longitude"] - longitude) ** 2)
+        best = None
+        for item in candidates[:self.DIVERT_CANDIDATES]:
+            plan = run.divert_route(item["latitude"], item["longitude"])
+            if plan and (best is None or plan["seconds"] < best[1]["seconds"]):
+                best = (item, plan)
+
+        run.pre_alert = {"hospital": name, "need_label": need_label, "status": "declined"}
+        refused = problem.startswith("has no")  # full, not "can't treat"
+        if refused:
+            admin_service.auto_grievance(
+                "HOSPITAL",
+                f"{name} could not take {run.label}'s patient",
+                description=(
+                    f"Pre-alert: no {need_label.lower()} free. "
+                    + ("No other hospital could take the patient either."
+                       if best is None else f"Sent to {best[0]['name']} instead.")
+                ),
+                request_id=run.trip_request_id,
+                priority="HIGH" if best is None else "MEDIUM",
+            )
+        if best is None:
+            self.add_agent_message(
+                f"{name} {problem}. No other hospital can take the patient, "
+                f"so {run.label} keeps going.",
+                kind="warning",
+            )
+            return
+
+        hospital, plan = best
+        reason = f"{name} {problem}"
+        if not run.divert(hospital, plan, now, reason):
+            run.pending_check = why
+            return
+        board.hold(run.vehicle_id, hospital["name"], run.condition)
+        run.pre_alert = {"hospital": hospital["name"], "need_label": need_label, "status": "ready"}
+        extra = round((plan["seconds"] - plan["old_seconds"]) / 60)
+        change = (f"{extra} min longer" if extra > 0
+                  else f"{-extra} min shorter" if extra < 0 else "same time")
+        self.add_agent_message(
+            f"{reason}. {run.label} now goes to {hospital['name']} ({change}). "
+            "They are ready.",
+            kind="hospital",
+        )
+
+    def _log_priority(self, run, source, now, previous=None, changed_by=None):
+        entry = {
+            "trip_id": self._run_id,
+            "ambulance_id": run.vehicle_id,
+            "ambulance_label": run.label,
+            **priority.describe(run.condition),
+            "previous_condition": previous,
+            "source": source,
+            "changed_by": changed_by,
+            "simulation_time": now,
+        }
+        self.priority_changes.append(entry)
+        priority_log.record(entry)
 
     def _on_police_alert(self, alert):
         """New police alert or status change (corridor/police_watch.py):
         phone the station on a new alert, save every change in the
         database (police_calls), and tell the dashboard."""
 
-        # For the trip's route optimization log (admin dashboard).
-        if alert["status"] == "ALERTED":
-            self._trip_alerts.add(alert["alert_id"])
-        elif alert["status"] == "ON_SCENE":
-            self._trip_police_on_scene.add(alert["alert_id"])
-        self._record_police(alert)
-
         if alert["status"] == "ALERTED":
             police_notifier.alert(alert)  # phones the station, saves the alert
             self.add_agent_message(
-                f"Police alert → {alert['station']}: clear {alert['road']} "
-                f"(ambulance in ~{max(1, round(alert['ambulance_eta_seconds'] / 60))} min).",
+                f"Called {alert['station']} to clear {alert['road']}. "
+                f"Ambulance is about {max(1, round(alert['ambulance_eta_seconds'] / 60))} min away.",
                 kind="police",
             )
             return
@@ -280,35 +788,9 @@ class SimulationService:
         police_notifier.record(alert)  # the new status, in police_calls
         if alert["status"] in ("PASSED", "CANCELLED"):
             self.add_agent_message(
-                f"Police alert for {alert['road']} closed: {alert['closed_reason']}.",
+                f"Police done at {alert['road']}: {alert['closed_reason']}.",
                 kind="police",
             )
-
-    def _record_police(self, alert):
-        """A police alert's change, for the trip's timeline."""
-        if self._recorder is None:
-            return
-        status = alert["status"]
-        if status == "ALERTED":
-            now, title = alert["alerted_at"], f"Police alerted: {alert['station']}"
-            detail = (
-                f"{alert['road']}: ambulance in ~{alert['ambulance_eta_seconds']:.0f} s, "
-                f"police can be there in ~{alert['police_eta_seconds']:.0f} s"
-            )
-        elif status == "ON_SCENE":
-            now, title = alert.get("on_scene_at"), f"Police reached {alert['road']}"
-            detail = f"Officers from {alert['station']} are clearing the road"
-        elif status in ("PASSED", "CANCELLED"):
-            now, title = alert.get("closed_at"), f"Police alert closed: {alert['road']}"
-            detail = alert.get("closed_reason")
-        else:
-            return
-        if now is None:
-            return
-        self._recorder.add(
-            now, "POLICE", title, detail=detail, road_name=alert["road"],
-            latitude=alert.get("latitude"), longitude=alert.get("longitude"),
-        )
 
     @staticmethod
     def _police_summary(police_watch):
@@ -319,6 +801,25 @@ class SimulationService:
         for alert in summary["alerts"]:
             alert["call"] = police_notifier.call_status(alert["alert_id"])
         return summary
+
+    def _ambulance_detail(self, run, traffic, signals):
+        """Live map and chase data for one independently routed ambulance."""
+        return {
+            "snapshot": run.snapshot,
+            "route_signals": run.engine.route_signals,
+            "signals": feed.signal_states(signals, run.upcoming),
+            "corridor": feed.corridor_entries(
+                run.upcoming, signals,
+                (run.snapshot or {}).get("speed", 0), run.engine,
+            ),
+            "route_traffic": (
+                feed.route_traffic_segments(run.route_cache, traffic, run.road_shapes)
+                if run.phase == "driving" else []
+            ),
+            "response": run.response.summary() if run.response else None,
+            "police_watch": self._police_summary(run.police_watch),
+            "police_along_route": run.trip.get("police_along_route", []),
+        }
 
     def create_incident(self):
         """
@@ -344,15 +845,14 @@ class SimulationService:
             # Reported at once, like a real accident report: the police
             # are alerted now, not once the queue behind it has built up.
             context.police_watch.report_incident(road_id, context.now)
-            if self._recorder is not None:
-                self._recorder.add(
-                    context.now, "ACCIDENT",
-                    f"Accident on {route_planner.road_name(road_id) or stretch_name}",
-                    detail="Simulated crash: the road is blocked",
-                    road_name=route_planner.road_name(road_id) or stretch_name,
-                    latitude=incident.get("latitude"),
-                    longitude=incident.get("longitude"),
-                )
+            road = route_planner.road_name(road_id) or stretch_name
+            context.runs[0].record_event(
+                context.now, "ACCIDENT", f"Accident on {road}",
+                detail="Test crash: the road is blocked",
+                road_name=road,
+                latitude=incident.get("latitude"),
+                longitude=incident.get("longitude"),
+            )
             return {
                 **incident,
                 "road": route_planner.road_name(road_id) or stretch_name,
@@ -361,10 +861,8 @@ class SimulationService:
 
         incident = self.run_in_simulation(act)
         self.add_agent_message(
-            f"Accident reported on {incident['road']} (simulated): the road is "
-            "blocked ahead of the ambulance. Police are being alerted now."
-            + ("" if incident["police_in_time"] else
-               " It is close: the police may not clear it before the ambulance arrives."),
+            f"Test accident on {incident['road']}. Road blocked, police called."
+            + ("" if incident["police_in_time"] else " They may arrive late."),
             kind="warning",
         )
         return incident
@@ -427,77 +925,14 @@ class SimulationService:
     # -------------------------------------------------------------
 
     def _create_connectors(self, traffic_level="normal"):
-        """SUMO versions of the simulation clock and the connectors."""
+        """SUMO versions of the simulation clock and the connectors
+        (each ambulance gets its own tracker: AmbulanceRun)."""
 
         simulation = SumoSimulation()
         simulation.start(sumo_command(traffic_level))
         apply_city_speed_limits()
 
-        return (
-            simulation,
-            SumoAmbulanceTracker(AMBULANCE_ID),
-            SumoTrafficSource(),
-            SumoSignalController(),
-        )
-
-    def _record_signals(self, engine, signals, now):
-        """Signals the corridor started switching this second."""
-        for event in reversed(engine.events):
-            if event["time"] != now:
-                break
-            if event["type"] != "active" or event["message"].startswith("Part of"):
-                continue
-            position = signals.position(event["signal_id"]) or {}
-            name = signals.name(event["signal_id"]) or "a signal"
-            self._recorder.add(
-                now, "SIGNAL", f"Signal switched green: {name}",
-                detail=event["message"],
-                junction_name=name,
-                latitude=position.get("latitude"),
-                longitude=position.get("longitude"),
-            )
-
-    def _recorded(self, kind, title):
-        """The recorder's route, track and events for finish_request(),
-        ending with an event of this kind at the last recorded moment."""
-        recorder, self._recorder = self._recorder, None
-        if recorder is None:
-            return {}
-        recorder.finish(recorder.last_time)
-        recorder.add(recorder.last_time, kind, title)
-        return {
-            "route_geometry": recorder.route_geometry,
-            "track": recorder.track,
-            "events": recorder.events,
-        }
-
-    def _planned_seconds(self, level_index):
-        """The AI trip-time estimate for this route and traffic level
-        (what the delay is measured against): (seconds or None, plan
-        status), the status saying why there is no estimate."""
-        if not os.path.exists(pretrip.MODEL_FILE):
-            logger.warning("No planned trip time: %s not found", pretrip.MODEL_FILE)
-            return None, "MODEL_MISSING"
-        try:
-            seconds = route_planner.estimate_route_seconds(
-                self.trip["roads"], level_index
-            )
-        except Exception:
-            logger.exception("Could not estimate the planned trip time")
-            return None, "ERROR"
-        if seconds is None:
-            logger.warning("No planned trip time for this route")
-            return None, "NO_ESTIMATE"
-        return seconds, "OK"
-
-    def _route_meters(self, traffic):
-        """Length of the trip's roads (first lane of each), or None."""
-        try:
-            return round(sum(
-                traffic.lane_length(f"{road}_0") for road in self.trip["roads"]
-            ))
-        except Exception:
-            return None
+        return simulation, SumoTrafficSource(), SumoSignalController()
 
     def _live_snapshot(self):
         """Live traffic along the trip and on main roads (TomTom)."""
@@ -556,9 +991,7 @@ class SimulationService:
             if forced in ("light", "normal", "heavy"):
                 traffic_level = forced
 
-            simulation, ambulance, traffic, signals = (
-                self._create_connectors(traffic_level)
-            )
+            simulation, traffic, signals = self._create_connectors(traffic_level)
             logger.info("Simulation started (%s traffic).", traffic_level)
             self._traffic_level = traffic_level
 
@@ -568,16 +1001,12 @@ class SimulationService:
                 )
                 logger.info("Live speeds applied to %d roads.", roads)
 
-            self._drive(simulation, ambulance, traffic, signals)
+            self._drive(simulation, traffic, signals)
 
         except Exception as error:
             logger.exception("Simulation error")
-            if self._open_request:
-                admin_service.finish_request(
-                    self._open_request, "FAILED", notes=f"Simulation error: {error}",
-                    **self._recorded("END", "Simulation error"),
-                )
-                self._open_request = None
+            for run in self.runs:
+                run.end_record("FAILED", f"Simulation error: {error}", "Simulation error")
             self.latest_state = _state(
                 "error",
                 error=str(error),
@@ -589,14 +1018,13 @@ class SimulationService:
             self.running = False
             self._fail_pending_requests()
 
-            # Stopped before the ambulance arrived.
-            if self._open_request:
-                admin_service.finish_request(
-                    self._open_request, "CANCELLED",
-                    notes="Simulation stopped before the ambulance arrived.",
-                    **self._recorded("END", "Stopped before arrival"),
+            # Ambulances still on the way when the simulation stopped.
+            for run in self.runs:
+                run.end_record(
+                    "CANCELLED",
+                    "Simulation stopped before the ambulance arrived.",
+                    "Stopped before arrival",
                 )
-                self._open_request = None
 
             if simulation is not None:
                 try:
@@ -604,55 +1032,46 @@ class SimulationService:
                 except Exception:
                     pass
 
+            # The next run finds the hospitals busy with other patients.
+            self.hospital_board.reshuffle()
+
             # Keep the last snapshot, marked as stopped (unless error).
             if self.latest_state.get("status") != "error":
                 self.latest_state = {**self.latest_state, "status": "stopped"}
 
             logger.info("Simulation stopped.")
 
-    def _drive(self, simulation, ambulance, traffic, signals):
-        # The AI clearance model decides how early each signal switches.
-        engine = CorridorEngine(
-            ambulance, traffic, signals,
-            clearance_predictor=clearance_predictor(traffic, signals),
+    def _drive(self, simulation, traffic, signals):
+        level_index = TRAFFIC_LEVELS.index(
+            getattr(self, "_traffic_level", "normal")
         )
 
-        route_cache = None
-        route_geometry = []
-        road_shapes = {}
-
-        # Deadlock watch: re-route or send police (corridor/response.py).
-        response = None
-
-        # Police for the stretches without signals (corridor/police_watch.py).
-        police_watch = None
+        # One referee for every ambulance's corridor (corridor/referee.py);
+        # the AI clearance model decides how early each signal switches.
+        referee = JunctionReferee(
+            notify=lambda text: self.add_agent_message(text, kind="referee")
+        )
+        self._fleet = (
+            traffic, signals, referee,
+            clearance_predictor(traffic, signals), level_index,
+        )
+        self._run_id = f"run{int(time.time())}"
+        first = self._new_run(
+            self.trip, self.condition, AMBULANCE_DEPART_TIME, simulation.time()
+        )
+        # Booked ambulances set off together with the first one.
+        for extra_trip, extra_condition in self.extra:
+            self._new_run(
+                extra_trip, extra_condition, AMBULANCE_DEPART_TIME, simulation.time()
+            )
 
         # What each police station is doing (corridor/police_board.py),
         # and simulated accidents (the dashboard's button).
         police_board = None
         incidents = SumoIncidents()
         give_way = SumoGiveWay() if GIVE_WAY else None
-        level_index = TRAFFIC_LEVELS.index(
-            getattr(self, "_traffic_level", "normal")
-        )
-        events_shown = 0
-        depart_time = None
-        arrival_time = None
-        last_snapshot = None
-        stops = 0
-        was_moving = False
-        dispatched = False
+        quiet_since = None  # every ambulance done (for the auto-stop)
         last_live_fetch = time.time()
-
-        # For the admin dashboard's request log (admin_service): seconds
-        # standing still, re-routes, and the signals on the route / the
-        # ones switched green for the ambulance (across re-routes).
-        stopped_seconds = 0
-        reroutes = 0
-        route_signal_ids = set()
-        cleared_signal_ids = set()
-        self._trip_alerts = set()
-        self._trip_police_on_scene = set()
 
         while self.running and simulation.expected_vehicles() > 0:
             step_started = time.time()
@@ -677,282 +1096,118 @@ class SimulationService:
                         snapshot, car_minutes
                     )
 
-            if route_cache is None:
-                phase = "warming_up"
-            elif arrival_time is None:
-                phase = "driving"
-            else:
-                phase = "arrived"
+            phase = {
+                "waiting": "warming_up", "driving": "driving", "arrived": "arrived",
+            }[first.phase]
 
             self._answer_requests(LiveContext(
                 now=now,
                 phase=phase,
-                ambulance=ambulance,
+                ambulance=first.ambulance,
                 traffic=traffic,
                 signals=signals,
-                engine=engine,
-                route_cache=route_cache,
-                response=response,
-                police_watch=police_watch,
+                engine=first.engine,
+                route_cache=first.route_cache,
+                response=first.response,
+                police_watch=first.police_watch,
                 incidents=incidents,
+                runs=list(self.runs),
+                referee=referee,
             ))
 
-            # Send the ambulance off once the roads have filled up.
-            if not dispatched and now >= AMBULANCE_DEPART_TIME:
-                ambulance.dispatch(
-                    self.trip["roads"],
-                    self.trip["depart_position"],
-                    self.trip["arrival_position"],
-                )
-                dispatched = True
-                logger.info(
-                    "Ambulance dispatched: %s to %s.",
-                    self.trip["start_name"], self.trip["hospital_name"],
-                )
-                self._open_request = admin_service.new_request_id()
-                self._recorder = TripRecorder(now)
-                self._recorder.add(
-                    now, "DISPATCH",
-                    f"Dispatched: {self.trip['start_name']} to {self.trip['hospital_name']}",
-                    detail=f"{TRAFFIC_LEVELS[level_index]} traffic",
-                )
-                planned_seconds, plan_status = self._planned_seconds(level_index)
-                admin_service.start_request(
-                    self._open_request,
-                    AMBULANCE_ID,
-                    self.trip["start_name"],
-                    self.trip["hospital_name"],
-                    TRAFFIC_LEVELS[level_index],
-                    planned_seconds,
-                    self._route_meters(traffic),
-                    plan_status=plan_status,
+            for run in list(self.runs):
+                run.step(now)
+            self._step_units(now)
+
+            # Police never hold back a road any ambulance still needs.
+            SumoResponder.protect_roads(
+                road for run in self.runs if run.phase == "driving"
+                for road in run.remaining_roads()
+            )
+
+            # Drivers ahead of every ambulance on its way (and of police
+            # cars) hear the siren and make room.
+            if give_way is not None:
+                give_way.step(
+                    [run.vehicle_id for run in self.runs if run.phase == "driving"], now
                 )
 
             # Warm-up: traffic builds up before the ambulance departs.
             # Run at full speed and only report progress.
-            if route_cache is None and not ambulance.is_on_road():
+            if first.phase == "waiting":
                 if int(now) % 10 == 0:
                     self.latest_state = _state(
                         "warming_up",
                         simulation_time=now,
                         warmup_seconds=AMBULANCE_DEPART_TIME,
                         vehicle_count=traffic.vehicle_count(),
+                        ambulances=[run.summary() for run in self.runs],
                     )
                 continue
 
-            if (
-                arrival_time is not None
-                and now - arrival_time > STOP_AFTER_ARRIVAL_SECONDS
-            ):
-                logger.info("Trip finished. Stopping simulation.")
-                break
-
-            upcoming = []
-
-            if ambulance.is_on_road():
-                if route_cache is None:
-                    route_cache = RouteCache(ambulance, traffic)
-                    route_geometry = feed.route_geometry(ambulance, traffic)
-                    if self._recorder is not None:
-                        self._recorder.set_route(route_geometry)
-                    engine.build_route_signals()
-                    depart_time = ambulance.departure_time()
-
-                    response = DeadlockResponse(
-                        ambulance, traffic, SumoResponder(),
-                        route_planner.police_stations(),
-                        route_ahead=lambda info: deadlock.route_ahead(
-                            info, traffic, ambulance, level_index
-                        ),
-                        predict=deadlock.predict,
-                        traffic_level=level_index,
-                        road_name=route_planner.road_name,
-                        route_seconds=lambda roads: (
-                            route_planner.estimate_route_seconds(
-                                roads, level_index
-                            )
-                        ),
-                        busy_roads=lambda: (
-                            police_watch.active_roads() if police_watch else set()
-                        ),
-                        incident_roads=incidents.active_roads,
-                    )
-                    response.set_route(
-                        deadlock.route_info(ambulance.route(), traffic)
-                    )
-
-                    police_watch = SignallessWatch(
-                        ambulance, traffic, self.trip.get("stretches", []),
-                        notify=self._on_police_alert,
-                        responder=SumoResponder(),
-                        trip_id=f"trip{int(now)}",
-                        busy_roads=response.police_roads,
-                        road_name=route_planner.road_name,
-                    )
-                    police_board = PoliceBoard(
-                        route_planner.police_stations(), ambulance, SumoResponder()
-                    )
-
-                snapshot = feed.ambulance_snapshot(ambulance)
-                snapshot.update(estimate_eta(route_cache, engine.route_signals))
-                snapshot["trip_time_seconds"] = round(now - depart_time, 1)
-                snapshot["depart_time"] = depart_time
-
-                # A stop = slowing below walking pace after moving.
-                moving = snapshot["speed"] > 0.5
-                if was_moving and not moving:
-                    stops += 1
-                was_moving = moving
-                if not moving:
-                    stopped_seconds += 1  # one simulated second per step
-                snapshot["stops"] = stops
-                last_snapshot = snapshot
-
-                # Drivers ahead hear the siren and make room.
-                if give_way is not None:
-                    give_way.step(AMBULANCE_ID, now)
-
-                upcoming = engine.upcoming_signals()
-                # The AI's predicted arrival at the junction ahead decides
-                # when that signal switches (corridor/engine.py).
-                seconds_to_next = (
-                    snapshot.get("next_signal_eta_seconds")
-                    if upcoming and snapshot.get("next_signal_route_index")
-                    == upcoming[0]["route_index"]
-                    else None
-                )
-                engine.apply(upcoming, now, seconds_to_next)
-                if self._recorder is not None:
-                    self._recorder.step(now, snapshot)
-                    self._record_signals(engine, signals, now)
-                route_signal_ids.update(
-                    item.get("signal_id") for item in engine.route_signals
-                )
-                cleared_signal_ids |= engine.overridden_signals
-
-                if response.step(now) == "rerouted":
-                    reroutes += 1
-                    # New route: signals, route data and map line anew.
-                    engine.reset()
-                    engine.route_signals = []
-                    engine.build_route_signals()
-                    route_cache = RouteCache(ambulance, traffic)
-                    route_geometry = feed.route_geometry(ambulance, traffic)
-                    road_shapes.clear()
-                    response.set_route(
-                        deadlock.route_info(ambulance.route(), traffic)
-                    )
-                    # New route, new stretches without signals.
-                    police_watch.close(
-                        now, "CANCELLED", "the ambulance was re-routed"
-                    )
-                    police_watch = SignallessWatch(
-                        ambulance, traffic,
-                        route_planner.route_police_plan(ambulance.route())[0],
-                        notify=self._on_police_alert,
-                        responder=SumoResponder(),
-                        trip_id=f"trip{int(now)}r",
-                        busy_roads=response.police_roads,
-                        road_name=route_planner.road_name,
-                    )
-
-                police_watch.step(now)
-                police_board.update(
-                    now, police_watch.alerts.values(), response.police
-                )
-
-                # Show the response's decisions in the dashboard feed.
-                for message in list(response.events)[events_shown:]:
-                    self.add_agent_message(message, kind="response")
-                    if self._recorder is not None:
-                        rerouted = "Re-routed" in message
-                        self._recorder.add(
-                            now, "REROUTE" if rerouted else "AI",
-                            "Re-routed" if rerouted else "AI deadlock watch",
-                            detail=message,
-                            latitude=snapshot.get("latitude"),
-                            longitude=snapshot.get("longitude"),
-                            data={"route": route_geometry} if rerouted else None,
-                        )
-                events_shown = len(response.events)
-
+            # Every ambulance has arrived, handed over its patient and (108)
+            # is back at its station: show the result, then stop.
+            if all(run.phase == "arrived" for run in self.runs) and not self._fleet_busy(now):
+                if give_way is not None and quiet_since is None:
+                    logger.info("Drivers who made room: %s", give_way.status())
+                    give_way.release_all()
+                quiet_since = quiet_since if quiet_since is not None else now
+                if now - quiet_since > STOP_AFTER_ARRIVAL_SECONDS:
+                    logger.info("Trip finished. Stopping simulation.")
+                    break
             else:
-                if arrival_time is None:
-                    logger.info("Ambulance reached the hospital.")
-                    if self._open_request:
-                        route_signal_ids.discard(None)
-                        if self._recorder is not None:
-                            self._recorder.finish(now)
-                            self._recorder.add(
-                                now, "ARRIVAL",
-                                f"Reached {self.trip['hospital_name']}",
-                                detail=f"{(now - depart_time) / 60:.1f} min after setting off",
-                            )
-                        recorder, self._recorder = self._recorder, None
-                        admin_service.finish_request(
-                            self._open_request,
-                            "COMPLETED",
-                            response_seconds=now - depart_time,
-                            stopped_seconds=stopped_seconds,
-                            stops=stops,
-                            route={
-                                "optimal_route_used": reroutes == 0,
-                                "signals_total": len(route_signal_ids),
-                                "signals_cleared": len(
-                                    cleared_signal_ids & route_signal_ids
-                                ),
-                                "police_alerts": len(self._trip_alerts),
-                                "police_on_scene": len(self._trip_police_on_scene),
-                                "reroutes": reroutes,
-                                "incidents": len(incidents.summary()),
-                            },
-                            route_geometry=recorder.route_geometry if recorder else None,
-                            track=recorder.track if recorder else None,
-                            events=recorder.events if recorder else None,
-                        )
-                        self._open_request = None
-                    engine.reset()
-                    if response:
-                        response.close()
-                    if police_watch:
-                        police_watch.close(now)
-                    if give_way is not None:
-                        logger.info("Drivers who made room: %s", give_way.status())
-                        give_way.release_all()
-                    arrival_time = now
+                quiet_since = None
 
-                snapshot = {
-                    **last_snapshot,
-                    "status": "COMPLETED",
-                    "distance_left_meters": 0.0,
-                    "eta_seconds": 0.0,
-                    "trip_time_seconds": round(arrival_time - depart_time, 1),
-                }
+            if first.phase == "driving":
+                if police_board is None:
+                    police_board = PoliceBoard(
+                        route_planner.police_stations(), first.ambulance,
+                        SumoResponder(),
+                    )
+                police_board.update(
+                    now, first.police_watch.alerts.values(),
+                    first.response.police,
+                )
 
             self.latest_state = _state(
                 "running",
                 simulation_time=now,
-                ambulance=snapshot,
+                ambulance=first.snapshot,
                 vehicles=_mark_pulled_over(
-                    traffic.vehicles(exclude=AMBULANCE_ID), give_way
+                    traffic.vehicles(
+                        exclude={run.vehicle_id for run in self.runs} | {
+                            unit["vehicle_id"] for unit in self.units.units.values()
+                            if unit["vehicle_id"]
+                        }
+                    ),
+                    give_way,
                 ),
-                signals=feed.signal_states(signals, upcoming),
+                signals=feed.signal_states(signals, first.upcoming),
                 corridor=feed.corridor_entries(
-                    upcoming, signals, snapshot.get("speed", 0), engine
+                    first.upcoming, signals,
+                    (first.snapshot or {}).get("speed", 0), first.engine,
                 ),
-                route=route_geometry,
-                route_signals=engine.route_signals,
+                route=first.route_geometry,
+                route_signals=first.engine.route_signals,
                 # Red / yellow / green on the route ahead (not after arrival).
                 route_traffic=(
-                    feed.route_traffic_segments(route_cache, traffic, road_shapes)
-                    if arrival_time is None
+                    feed.route_traffic_segments(
+                        first.route_cache, traffic, first.road_shapes
+                    )
+                    if first.phase == "driving"
                     else []
                 ),
-                response=response.summary() if response else None,
-                police_watch=self._police_summary(police_watch),
+                response=first.response.summary() if first.response else None,
+                police_watch=self._police_summary(first.police_watch),
                 police_board=police_board.summary() if police_board else None,
                 incidents=incidents.summary(),
                 give_way=give_way.status() if give_way else None,
+                ambulances=[run.summary() for run in self.runs],
+                ambulance_details={
+                    run.vehicle_id: self._ambulance_detail(run, traffic, signals)
+                    for run in self.runs[1:]
+                },
+                referee=referee.summary(),
             )
 
             # One simulated second takes 1 / playback_speed real seconds.
