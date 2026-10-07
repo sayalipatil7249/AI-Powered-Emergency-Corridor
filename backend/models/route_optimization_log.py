@@ -47,4 +47,4 @@ class RouteOptimizationLog(Base):
     # Planned minus actual (positive = faster than planned)
     seconds_vs_plan: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)

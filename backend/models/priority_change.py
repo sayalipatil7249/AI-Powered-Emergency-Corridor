@@ -35,4 +35,4 @@ class PriorityChange(Base):
 
     simulation_time: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)

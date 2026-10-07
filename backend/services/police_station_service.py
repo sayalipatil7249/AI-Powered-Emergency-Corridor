@@ -165,7 +165,7 @@ def set_phone(db, station_id, phone):
     if row is None:
         return None
     row.phone = clean_phone(phone) if phone else None
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now()
     db.commit()
     db.refresh(row)
     return row
@@ -228,7 +228,7 @@ def save_call(alert_id, alert=None, **call):
         if row is None:
             if alert is None:
                 return
-            row = PoliceCall(alert_id=alert_id, created_at=datetime.utcnow())
+            row = PoliceCall(alert_id=alert_id, created_at=datetime.now())
             db.add(row)
         for key, column in _ALERT_FIELDS.items():
             if alert is not None and key in alert:
@@ -236,7 +236,7 @@ def save_call(alert_id, alert=None, **call):
         for column, value in call.items():
             if value is not None:
                 setattr(row, column, value)
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now()
         db.commit()
     except Exception as error:
         db.rollback()

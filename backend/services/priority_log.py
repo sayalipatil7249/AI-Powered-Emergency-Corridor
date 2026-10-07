@@ -36,7 +36,7 @@ def _save(entry):
                     "simulation_time",
                 )
             },
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(),
         ))
         db.commit()
     except Exception as error:

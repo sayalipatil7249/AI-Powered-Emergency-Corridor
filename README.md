@@ -322,6 +322,9 @@ steps of [Setup](#setup).
   `CORS_ORIGINS=https://corridor.example.org`. Without it the browser blocks the dashboard
   from calling the API.
 - SUMO runs without its window by default (`SUMO_GUI=0`), which a server needs.
+- Time zone: the app saves times in the server's local time, so set it to India time
+  (e.g. `sudo timedatectl set-timezone Asia/Kolkata`, or `TZ=Asia/Kolkata` for the backend
+  process); otherwise the admin pages show UTC.
 - Optional keys: `ANTHROPIC_API_KEY` (AI chat and intake), `TOMTOM_API_KEY` (live traffic),
   Twilio settings (police phone calls; `POLICE_CALLS=0` only logs them).
 

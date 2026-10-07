@@ -48,7 +48,7 @@ def create_emergency_request(
 
     # Close any older ACTIVE emergency for this ambulance,
     # so only the newest trip is ACTIVE.
-    now = datetime.utcnow()
+    now = datetime.now()
 
     older_emergencies = (
         db.query(Emergency)
