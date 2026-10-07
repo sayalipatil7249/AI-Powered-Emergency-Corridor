@@ -116,11 +116,6 @@ def demo_plan():
     )
 
 
-def demo_route_roads():
-    """Road ids of the demo route."""
-    return list(demo_plan()["roads"])
-
-
 # OpenStreetMap import gave main roads SUMO's default 100 km/h limit,
 # which is unrealistic for central Pune. Indian city roads are
 # usually limited to 50 km/h.

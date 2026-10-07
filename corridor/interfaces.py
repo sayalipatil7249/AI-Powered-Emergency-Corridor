@@ -185,11 +185,6 @@ class Responder(Protocol):
     def reroute_ambulance(self, vehicle_id: str, roads: list) -> bool:
         """Put the ambulance on a new route starting with its current road."""
 
-    def route_around(self, vehicle_id: str, avoid_roads: list):
-        """Fastest route from the vehicle's current road to its destination
-        with current travel times, avoiding these roads: road ids or None.
-        Does not change the vehicle's route."""
-
     def send_unit(self, unit_id: str, roads: list) -> bool:
         """Send a police vehicle along these roads, now."""
 

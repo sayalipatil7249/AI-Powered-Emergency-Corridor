@@ -126,7 +126,6 @@ simulations and checks that a refactor did not change their results.
 │       ├── route_service.py       Road route from OSRM
 │       ├── junction_service.py    Finds junctions and traffic lights on a route
 │       ├── eta_service.py         Time-to-reach estimates for each signal
-│       ├── corridor_service.py    ACTIVE / PREPARING / STANDBY assignment
 │       ├── signal_service.py      Same state machine for a moving ambulance
 │       ├── emergency_service.py   Creates an emergency trip and saves its route
 │       └── ambulance_ / hospital_ / traffic_signal_service.py   Database records
