@@ -1200,6 +1200,11 @@ def hospital_road(latitude, longitude):
 # Time at the scene to assess and load the patient (s).
 ON_SCENE_SECONDS = 180
 
+# Carrying the patient on a stretcher to where the ambulance stops (m/s):
+# choosing where to stop, a stop 150 m away costs ~2.5 min, so the
+# ambulance stops next to the patient unless that is much slower to drive.
+STRETCHER_SPEED = 1.0
+
 # Ambulances are stationed at these hospital types (corridor/hospital_care.py).
 BASE_TYPES = ("major", "general")
 
@@ -1274,7 +1279,11 @@ def plan_journey(pickup_latitude, pickup_longitude, hospital_latitude,
         if (len(to_patient["roads"]) == 1
                 and to_patient["arrival_position"] <= to_patient["depart_position"] + 5):
             continue
-        total = to_patient["minutes_without_traffic"] + to_hospital["minutes_without_traffic"]
+        carry_minutes = pickup[2] / STRETCHER_SPEED / 60
+        total = (
+            to_patient["minutes_without_traffic"] + to_hospital["minutes_without_traffic"]
+            + carry_minutes
+        )
         if best is None or total < best[0]:
             best = (total, to_patient, to_hospital)
     if best is None:
