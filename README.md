@@ -116,11 +116,12 @@ simulations and checks that a refactor did not change their results.
 │   ├── api/routes/              HTTP + WebSocket endpoints (simulation, planning, police, admin, …)
 │   └── services/
 │       ├── simulation_service.py  ★ Runs the live simulation loop for the dashboard
+│       ├── ambulance_run.py       One ambulance's trip: its corridor, ETA, police watch
+│       ├── assistant_service.py   "Ask AI" chat and "Describe the emergency" (Claude)
 │       ├── trip_recorder.py       Records each trip's events and driven track
 │       ├── admin_service.py       KPIs, delay reasons, problem junctions, grievances
 │       ├── police_station_service.py  Police stations and their contact numbers
 │       ├── police_notifier.py     Twilio voice calls to police stations
-│       ├── ambulance_run.py       One ambulance's trip: its corridor, ETA, police watch
 │       ├── priority_log.py        Saves every patient-priority setting (priority_changes)
 │       ├── route_service.py       Road route from OSRM
 │       ├── junction_service.py    Finds junctions and traffic lights on a route
@@ -134,9 +135,12 @@ simulations and checks that a refactor did not change their results.
 │   ├── interfaces.py            The 3 connectors: AmbulanceTracker, TrafficSource, SignalController
 │   ├── engine.py                Finds signals ahead and switches each one just in time
 │   ├── safety.py                Rules for early-green requests from AI agents
-│   ├── response.py              Deadlock response: police or re-route; stuck re-routing
+│   ├── response.py              Deadlock response: police, or a detour for a stuck critical patient
 │   ├── referee.py               Several ambulances: who gets a shared signal first
 │   ├── priority.py              Patient conditions → priority levels and weights
+│   ├── routing.py               Several ambulances: plans routes before departure so they clash less
+│   ├── dispatch.py              108 dispatch: which ambulance (ALS / BLS) goes to the patient
+│   ├── hospital_care.py         Which hospitals can treat which condition (cath lab, ICU…)
 │   ├── police_watch.py          Police alerts for jams on stretches without signals
 │   ├── police_board.py          Live status of every police station
 │   └── feed.py                  Builds the live state for the dashboard
@@ -155,6 +159,8 @@ simulations and checks that a refactor did not change their results.
 │           ├── hospitals.json               ← hospitals in the area (from OpenStreetMap)
 │           ├── police_stations.json         ← 11 police stations / chowkis (from OpenStreetMap)
 │           ├── scenarios/                   ← demo traffic + ambulance used by the dashboard
+│           ├── area_2x/                     ← the bigger area (SIM_AREA=2x): network,
+│           │                                  hospitals, police stations, demo traffic
 │           └── expanded_network/
 │               ├── expanded.net.xml.gz      ← road network used by the demo
 │               └── ambulance_hospital.rou.xml   ← ambulance route of the demo trip
@@ -165,10 +171,11 @@ simulations and checks that a refactor did not change their results.
 │       ├── App.jsx              Live page: trip planner, start/stop, WebSocket, playback speed
 │       ├── MapView.jsx          Live 2D Leaflet map
 │       ├── ChaseView.jsx        3D view with the camera following the ambulance (MapLibre GL)
-│       ├── components/          Trip planner, live status cards (corridor, AI response, police,
-│       │                        live traffic, drivers making room, AI agent feed), moving markers
-│       └── admin/               Admin dashboard: KPIs, charts, route performance,
-│                                problem junctions, grievances, trip detail page
+│       ├── components/          Trip planner, emergency intake, ambulances (fleet) panel,
+│       │                        live status cards (corridor, AI response, police, live traffic,
+│       │                        drivers making room, AI agent feed), Ask AI chat, Report a problem
+│       └── admin/               Admin pages (sidebar): dashboard, complaints, trips, who went
+│                                first, priority changes, police; trip detail page
 │
 ├── agent/                       AI supervisor agent (LangGraph + Claude + MCP)
 │   ├── graph.py                 The observe → assess → think → wait loop
@@ -198,6 +205,9 @@ simulations and checks that a refactor did not change their results.
 │   ├── signal_inspection/       Inspecting SUMO traffic lights
 │   └── tests/                   Checks: route, WebSocket, MCP, police call, admin data quality,
 │                                and regression_check.py (refactor safety net)
+│
+├── tests/                       Unit tests: routing, critical rescue, fleet planning,
+│                                junction priority (python -m unittest discover -s tests)
 │
 ├── police_contacts.example.json Template for per-station TEST phone numbers
 ├── see_police_stations.sql      Query to look at the police tables
@@ -270,11 +280,11 @@ npm run dev
 ```
 
 **Plan a trip (optional):** in the side panel, type a place in central Pune (or click
-**Pick on map**), choose a hospital and click **Find fastest route**. The map highlights the
-route and its signals, with its length and time. Without a plan, Start runs the tested demo
-trip (Shukrawar Peth → Ruby Hall Clinic, along the fastest route).
+**Pick on map**) and choose a hospital. **Start** then runs that trip; **Find route** first
+shows the route and its signals, with its length and time. With nothing chosen, Start runs
+the tested demo trip (Shukrawar Peth → Ruby Hall Clinic, along the fastest route).
 
-Open http://localhost:5173 and click **Start simulation**. Traffic first builds up for 10
+Open http://localhost:5173 and click **Start**. Traffic first builds up for 10
 simulated minutes (fast-forwarded, a few seconds of real time), then the ambulance departs.
 Watch the route panel and the map as signals ahead switch to green. The simulation stops by
 itself shortly after the ambulance arrives, or click **Stop**.
@@ -284,14 +294,62 @@ While it runs you can:
 - switch between the **2D map** and the **3D chase view** (camera behind the ambulance);
 - change the **playback speed** (1×, 2×, 5×, 10×) to watch the trip faster. The simulated
   speeds do not change;
-- click **Simulate accident ahead** to test the police response (see
+- click **Accident ahead of Ambulance 1** (Ambulances → Test tools) to test the police
+  response (see
   [Police for roads without signals](#police-for-roads-without-signals-phone-call-alerts)).
 
 The **admin dashboard** is at http://localhost:5173/#/admin (see
 [Admin dashboard](#admin-dashboard)).
 
-To run SUMO without its window, set `SUMO_GUI=0` in `.env` (needed on Apple Silicon Macs,
-where the SUMO window can hang).
+SUMO runs without its own window by default; set `SUMO_GUI=1` in `.env` to also watch it
+there (not on Apple Silicon Macs, where the SUMO window can hang).
+
+---
+
+## Deploying on a server
+
+The steps above run the project on a laptop. On a server (Linux), the same backend and
+frontend run like this:
+
+**1. Install** Python 3.11, Node.js 20+, PostgreSQL with PostGIS, and SUMO 1.27
+(`pip install eclipse-sumo==1.27.1` inside the virtual environment is the simplest way;
+otherwise the system package and `SUMO_HOME`). Then the database, backend and frontend
+steps of [Setup](#setup).
+
+**2. `.env`** (copy `.env.example`):
+
+- `DATABASE_URL`: the server's PostgreSQL database.
+- `CORS_ORIGINS`: the address the dashboard is opened at, e.g.
+  `CORS_ORIGINS=https://corridor.example.org`. Without it the browser blocks the dashboard
+  from calling the API.
+- SUMO runs without its window by default (`SUMO_GUI=0`), which a server needs.
+- Optional keys: `ANTHROPIC_API_KEY` (AI chat and intake), `TOMTOM_API_KEY` (live traffic),
+  Twilio settings (police phone calls; `POLICE_CALLS=0` only logs them).
+
+**3. Backend:** run it **without `--reload`** and with **exactly one worker**. The live
+simulation runs inside the backend process; a second worker would start a second,
+separate simulation.
+
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+**4. Frontend:** build it with the backend's public address, then serve `frontend/dist/`
+as static files (e.g. nginx or any static web host):
+
+```bash
+cd frontend
+VITE_API_URL=https://api.corridor.example.org npm run build
+```
+
+The dashboard uses a WebSocket (`/simulation/ws`) on the same address, so a reverse proxy
+in front of the backend must pass WebSocket upgrades through.
+
+**5. Access control.** The project has **no login**: anyone who can open the dashboard can
+also open the admin page (change police phone numbers, close complaints), start trips that
+make real Twilio calls, and use the AI chat on your Anthropic key. Run it on a private
+network (VPN / office network), or put a password in front of it (e.g. HTTP basic auth in
+the reverse proxy), before exposing it to the internet.
 
 ---
 
@@ -310,10 +368,10 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/fleet/ambulances/crossing` | Demo: another ambulance that crosses Ambulance 1's route at a signal at about the same time |
 | PUT | `/fleet/ambulances/{vehicle_id}/condition` | The crew sets its patient's condition (applies at once, logged) |
 | GET | `/fleet/priority-log` | Every priority setting, newest first |
-| GET | `/admin/kpis`, `/admin/delays`, `/admin/trend`, `/admin/route-performance` | Admin dashboard figures for recorded trips (`?days=`) |
-| GET / PATCH | `/admin/requests`, `/admin/requests/{request_id}` | Recorded trips; one trip with its path and events; correct a delay reason |
+| GET | `/admin/kpis`, `/admin/delays`, `/admin/trend`, `/admin/route-performance` | Admin dashboard figures for recorded trips (`?days=` for the last N days) |
+| GET / PATCH | `/admin/requests`, `/admin/requests/{request_id}` | Recorded trips; one trip with its path and events; correct a trip's status, delay reason or notes |
 | GET | `/admin/junctions` | Junctions where ambulances stood still most |
-| GET / POST / PATCH | `/admin/grievances` | Grievance tickets |
+| GET / POST / PATCH | `/admin/grievances`, `/admin/grievances/{id}` | Complaint (grievance) tickets |
 | GET | `/plan/area` | The simulated area (trips must start and end inside it) |
 | GET | `/plan/hospitals` | Hospitals inside the area |
 | GET | `/plan/police` | Police stations inside the area |
@@ -326,11 +384,17 @@ Full interactive docs: http://localhost:8000/docs
 | GET | `/police-stations/{station_id}` | One police station |
 | PUT | `/police-stations/{station_id}/phone` | Save or remove a station's contact number |
 | GET | `/police-stations/calls` | Log of police alerts and phone calls |
-| GET | `/admin/kpis`, `/admin/delays`, `/admin/trend`, `/admin/route-performance` | Admin analytics (`?days=` for the last N days) |
-| GET / PATCH | `/admin/requests`, `/admin/requests/{request_id}` | Recorded trips; correct a trip's status, delay reason or notes |
-| GET | `/admin/junctions` | Problem junctions (where ambulances stood still longest) |
-| GET / POST / PATCH | `/admin/grievances…` | Grievance tickets and their summary |
+| GET | `/admin/stuck-spots` | Where ambulances stood still, grouped by PostGIS |
+| GET | `/admin/grievances/summary` | Complaint counts by status, for the sidebar badge |
 | GET | `/admin/options` | Allowed values for the admin filters and forms |
+| POST | `/complaints` | "Report a problem" from the main screen (crew, 108 control room, hospital, police) |
+| POST | `/fleet/preview`, `/fleet/start` | Several ambulance requests: preview their routes, then dispatch them together |
+| POST | `/fleet/ambulances/{vehicle_id}/call-police` | The crew is stuck: call the fastest police station now (at most once every 2 min) |
+| POST | `/fleet/ambulances/{vehicle_id}/hospital-declines` | Test: the hospital can't take the patient any more; the ambulance is diverted |
+| POST | `/plan/call-hospitals` | 108 call centre pre-alerts the nearest hospitals that can treat the patient |
+| GET | `/plan/where?latitude=&longitude=` | What is at a point: a hospital, police station or the nearest street |
+| POST | `/assistant/intake` | "Describe the emergency": the AI fills in the trip planner (Claude) |
+| POST | `/assistant/ask` | "Ask AI" chat about the live simulation (Claude) |
 | GET | `/simulation/state` | Latest simulation snapshot |
 | WS | `/simulation/ws` | Live simulation state, every 0.5 s |
 | POST | `/mcp` | MCP server for AI agents (see [AI layer](#ai-layer)) |
@@ -342,8 +406,8 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/emergencies/` | Start an emergency trip and save its route |
 | GET | `/corridors/{ambulance_id}` | Current corridor for an active emergency |
 
-The live dashboard uses the `/simulation/*`, `/plan/*` and `/police-stations/*` endpoints; the
-admin dashboard uses `/admin/*`. The older `/ambulances`, `/hospitals`, `/traffic-signals`,
+The live dashboard uses the `/simulation/*`, `/fleet/*`, `/plan/*`, `/assistant/*`,
+`/complaints` and `/police-stations/*` endpoints; the admin dashboard uses `/admin/*`. The older `/ambulances`, `/hospitals`, `/traffic-signals`,
 `/routes`, `/emergencies` and `/corridors` endpoints (OSRM based) work alongside them but are
 not connected to the SUMO simulation.
 
@@ -365,6 +429,7 @@ Checks in `scripts/tests/`:
 |---|---|
 | `python -m scripts.tests.regression_check --save/--compare <file>` | Four fixed simulations give the same results after a refactor |
 | `python -m scripts.tests.test_admin_data_quality` | Admin KPIs: trips without an AI plan are not counted as on time |
+| `python -m unittest discover -s tests` | Unit tests (`tests/`): route selection, critical rescue, fleet planning, junction priority |
 | `python -m scripts.tests.test_mcp` | MCP server end to end (backend must be running) |
 | `python -m scripts.tests.test_police_call` | One Twilio test call |
 | `python -m scripts.tests.test_simulation_websocket` | Live WebSocket feed (backend must be running) |
@@ -403,7 +468,7 @@ apart, or one big junction crossed several times, switch together.
 
 ### Trip-time estimate before departure (AI pre-trip model)
 
-"Find fastest route" shows how long an ambulance will really take in the current live
+"Find route" shows how long an ambulance will really take in the current live
 traffic, learned from hundreds of simulated trips on random routes (`ai/pretrip.py`;
 `python -m ai.pretrip_experiments`, `python -m ai.train_pretrip`). The old "empty roads" time
 is shown next to it.
@@ -426,10 +491,11 @@ sent they saved 126 s on average (up to 11 min in the worst deadlocks). Re-routi
 trip it was used on slower, so it is still compared and shown but not carried out
 (`ALLOW_REROUTE` in `corridor/response.py`).
 
-**Stuck re-routing:** when the ambulance has stood still for 40 s, or an accident blocks the road
-ahead, it takes a way round from its current road if the trip-time model says it saves at least
-30 s (at most 3 times per trip). In tests it made most trips slower; set `MAX_STUCK_REROUTES = 0`
-in `corridor/response.py` to switch it off.
+**Stuck ambulances:** a **critical** patient's ambulance that has stood still for 45 s may
+take a detour, if one is still possible and saves at least 90 s (police already close by get
+the chance to clear the jam first). Other ambulances wait for the police. Any ambulance
+standing still for 2 min files a complaint ticket for the admin automatically
+(`backend/services/ambulance_run.py`). The crew can also press **Call police: we're stuck**.
 
 The decision, the police car and the jam appear on the map and in the "Jam prediction (AI)"
 card; the MCP tool `get_deadlock_watch` lets an AI agent read it. Rebuild with
@@ -445,7 +511,7 @@ The corridor clears queues at signals by turning them green. On the parts of the
    route is split into *stretches without signals* (dashed purple on the map). For each
    stretch the police stations are ranked by **driving time on the road network**, not
    straight-line distance (a station across the river can be close as the crow flies but far
-   by road). "Find fastest route" lists the stations that cover the route.
+   by road). "Find route" lists the stations that cover the route.
 2. **While the ambulance drives** (`corridor/police_watch.py`), every 5 s each stretch up to
    3 km ahead is measured: how full of stopped vehicles its roads are and how slowly traffic
    moves. Accidents, roadwork and heavy traffic all show up this way.
@@ -511,7 +577,7 @@ at once: copy `police_contacts.example.json` to `police_contacts.json`, fill it 
   labels, and a red beacon over a simulated accident.
 - **Moving markers:** the ambulance and police cars glide between updates, the ambulance
   turns to face where it drives, police cars flash red/blue, and both leave a short trail.
-- **Simulate accident ahead** (Ambulances sidebar demo control, while Ambulance 1 drives): crashed vehicles block
+- **Accident ahead of Ambulance 1** (Ambulances → Test tools, while Ambulance 1 drives): crashed vehicles block
   every lane of a road without signals, far enough ahead that police can get there first.
   A reported accident is alerted **at once** (no waiting for the queue to build up) and the
   station is phoned; officers stuck in the queue within 250 m park and walk, and clear the
@@ -893,10 +959,26 @@ when the trip ends so the simulation never waits for the database):
 | `trip_events` | Stops, signals, police, accidents and re-routes in time order, plus the planned route and the driven track |
 | `grievances` | Complaint tickets from users, drivers, hospitals or police |
 
-What the dashboard shows:
+The admin page has a sidebar with these sections:
 
-- **KPIs:** total trips, success rate, on-time rate, average response time and delay, open
-  grievances. Trips without an AI planned time are counted separately, never as "on time".
+- **Dashboard:** every ambulance right now on a map, the key figures and charts.
+- **Complaints:** tickets from "Report a problem" (crew, 108 control room, hospitals, police)
+  and the ones the app files itself (e.g. an ambulance stuck for 2 min); set the status and add
+  a note when solved.
+- **Trips:** every trip (click one for its map and timeline) and the junctions and spots where
+  ambulances lost the most time (stuck spots grouped with PostGIS).
+- **Who went first:** when two ambulances needed the same signal, who got the green, who
+  waited, and why (see [Several ambulances](#several-ambulances-patient-priority-and-the-junction-referee)).
+- **Priority changes:** every change of a patient's condition, from what, to what and by whom.
+- **Police:** police called to clear roads, what happened, and the stations' phone numbers
+  (editable).
+
+What the figures show:
+
+- **KPIs:** total trips, success rate, on-time rate, average time to hospital and delay, open
+  complaints, and for 108 trips where the time goes (to the patient, at the scene, to the
+  hospital, handover). Trips without an AI planned time are counted separately, never as
+  "on time".
 - **Delay reasons** (`TRAFFIC`, `BAD_ROUTE`, `ACCIDENT`, set automatically; `VEHICLE_ISSUE`,
   `DRIVER_DELAY`, `OTHER` set by an admin) and **requests / response time per day** (charts).
 - **Request log** with filters; an admin can correct a trip's delay reason, status or notes.

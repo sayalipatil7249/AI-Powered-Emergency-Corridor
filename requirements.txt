@@ -1,15 +1,20 @@
 annotated-doc==0.0.5
 annotated-types==0.8.0
+anthropic==1.11.0
 anyio==4.15.0
 certifi==2026.7.22
 charset-normalizer==3.5.1
 click==8.5.0
 cloudpickle==3.1.2
+docstring-parser==0.18.0
 fastapi==0.141.1
 GeoAlchemy2==0.20.0
 greenlet==3.5.5
 h11==0.16.0
+httpcore2==2.13.1
+httpx2==2.13.1
 idna==3.19
+jiter==0.17.0
 joblib==1.6.0
 mcp==2.2.0
 numpy==2.4.6
@@ -22,10 +27,12 @@ python-dotenv==1.2.3
 requests==2.34.2
 rtree==1.4.1
 scikit-learn==1.9.1
+sniffio==1.3.1
 SQLAlchemy==2.0.52
 starlette==1.6.0
 sumolib==1.27.1
 traci==1.27.1
+truststore==0.10.4
 twilio==9.11.2
 typing-inspection==0.4.4
 typing_extensions==4.16.0
@@ -34,4 +41,4 @@ uvicorn==0.52.4
 websockets==17.1
 
 # Training the AI models and running the AI agent (python -m agent.run)
-# also need: pip install pandas matplotlib anthropic langgraph
+# also need: pip install pandas matplotlib langgraph

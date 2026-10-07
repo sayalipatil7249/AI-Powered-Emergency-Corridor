@@ -27,8 +27,9 @@ def _find_sumo_home():
 
 SUMO_HOME = _find_sumo_home()
 
-# Set SUMO_GUI=0 to run SUMO without its window (headless).
-USE_SUMO_GUI = os.environ.get("SUMO_GUI", "1") != "0"
+# SUMO runs without its window (headless, as on a server); set SUMO_GUI=1
+# to also watch it in SUMO's own window. The dashboard works either way.
+USE_SUMO_GUI = os.environ.get("SUMO_GUI", "0") == "1"
 
 # Windows binaries end in .exe; macOS/Linux binaries have no extension.
 SUMO_BINARY_EXTENSION = ".exe" if os.name == "nt" else ""
