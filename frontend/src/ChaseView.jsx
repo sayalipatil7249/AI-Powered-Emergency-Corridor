@@ -49,12 +49,10 @@ const SIREN_FLASH_MS = 450;
 // A tall glowing pillar marks the hospital from far away.
 const HOSPITAL_BEACON = { length: 10, width: 10, height: 45 };
 // A shorter amber pillar marks the patient (108 trips with a pickup),
-// so it is clear why the ambulance stops there; grey once picked up.
+// so it is clear why the ambulance stops there; gone once picked up.
 const PATIENT_BEACON = { length: 4, width: 4, height: 16 };
 const PATIENT_COLOR = "#f59e0b";
 const PATIENT_HALO = "#92400e";
-const PICKED_UP_COLOR = "#94a3b8";
-const PICKED_UP_HALO = "#334155";
 
 // Police: cars, station towers, accident beacons (metres).
 const POLICE_CAR = { length: 4.6, width: 1.9, height: 1.6 };
@@ -178,12 +176,10 @@ function hospitalGeoJson(point, name) {
   };
 }
 
-function patientGeoJson(point, pickedUp) {
+function patientGeoJson(point) {
   if (!point) return EMPTY;
   const [latitude, longitude] = point;
-  const properties = pickedUp
-    ? { label: "Patient picked up", color: PICKED_UP_COLOR, halo: PICKED_UP_HALO }
-    : { label: "Patient", color: PATIENT_COLOR, halo: PATIENT_HALO };
+  const properties = { label: "Patient", color: PATIENT_COLOR, halo: PATIENT_HALO };
   return {
     type: "FeatureCollection",
     features: [
@@ -935,13 +931,14 @@ function ChaseView({
     }
   }, [ready, hospitalPoint, hospitalName]);
 
-  // The patient's pickup point, the whole trip (grey once on board).
-  const pickedUp = ambulance?.leg === "to_hospital";
+  // The patient, until the ambulance has picked them up.
+  const pickedUp =
+    ambulance?.leg === "to_hospital" || ["COMPLETED", "arrived"].includes(ambulance?.status);
   useEffect(() => {
     if (ready) {
       mapRef.current
         .getSource("patient")
-        .setData(patientGeoJson(pickupPoint, pickedUp));
+        .setData(patientGeoJson(pickedUp ? null : pickupPoint));
     }
   }, [ready, pickupPoint, pickedUp]);
 

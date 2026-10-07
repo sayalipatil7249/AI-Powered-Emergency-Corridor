@@ -501,6 +501,9 @@ function MapView({
   const start = startPoint || route[0];
   const hospital = hospitalPoint || route[route.length - 1];
   const arrived = ambulance?.status === "COMPLETED";
+  // The patient marker goes once the ambulance has picked them up.
+  const pickedUp =
+    ambulance?.leg === "to_hospital" || ["COMPLETED", "arrived"].includes(ambulance?.status);
 
   return (
     <div className={`map-wrapper ${pickMode ? "picking" : ""}`}>
@@ -704,7 +707,7 @@ function MapView({
           </Marker>
         )}
 
-        {pickupPoint && (
+        {pickupPoint && !pickedUp && (
           <Marker position={pickupPoint} icon={patientIcon} zIndexOffset={2500}>
             <Tooltip key={labelsKey} permanent={showLabels} direction="top" offset={[0, -14]}>
               Patient
