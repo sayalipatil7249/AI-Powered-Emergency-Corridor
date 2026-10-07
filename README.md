@@ -994,7 +994,8 @@ Filter by period with the last N days. Trips left `IN_PROGRESS` by a stopped bac
 ## Known limitations
 
 - **Up to ten independent ambulance requests.** Any start and hospital inside the
-  simulated area (about 6 × 5 km of central Pune; see *Simulated area*) can be chosen. Coordination uses estimated
+  simulated area (4.2 × 3.3 km of central Pune by default, 5.9 × 4.7 km with
+  `SIM_AREA=2x`; see *Simulated area*) can be chosen. Coordination uses estimated
   arrivals and a bounded set of alternatives, not a globally optimal fleet search or live
   congestion forecasts. Already accepted routes are not automatically re-optimized when a
   new request arrives or a patient's condition changes; the live referee adapts priority.
@@ -1003,8 +1004,18 @@ Filter by period with the last N days. Trips left `IN_PROGRESS` by a stopped bac
   account. The police watch and deadlock response of each ambulance do not coordinate with
   the other ambulances' (two could ask the same station).
 - The map, route timeline and chase camera can focus on any ambulance. The
-  traffic-wide AI feed and accident simulation still report Ambulance 1's run.
+  traffic-wide AI feed and accident simulation still report Ambulance 1's run;
   the others appear on the map and in the Ambulances panel.
+- **Vehicles can briefly overlap inside junctions.** SUMO's simplified junction model lets
+  vehicles pass through each other there for 1–2 seconds (measured: 1–2 vehicles per
+  ambulance trip in heavy traffic), mostly when traffic squeezes past a vehicle standing in
+  the junction (`--ignore-junction-blocker`) or the ambulance does not wait for a car already
+  inside one. Real crashes are not simulated. Making everyone wait instead made the
+  ambulance up to 55 s slower without removing the overlaps, so it was not changed.
+- **Patients next to the map's edge.** Some roads at the edge of the simulated map only lead
+  off it, or only come in. The ambulance then stops on the nearest road it can reach and
+  leave, up to 300 m away (the crew carries the patient there); further away, planning says
+  so and asks for a pin a little further inside the area.
 - **The ETA model was trained mostly on the demo route.** It works on other routes but is less
   accurate there until it is retrained on many routes.
 - **Signal timings are SUMO's defaults,** not measured Pune timings. Some OpenStreetMap

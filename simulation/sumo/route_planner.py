@@ -168,17 +168,37 @@ def _reachable_roads():
     return {edge.getID() for edge in net.getReachable(hub, vclass=VEHICLE_CLASS)}
 
 
-def _nearby_roads(latitude, longitude):
-    """Drivable roads near a point, nearest first:
-    [(edge, position, distance)]."""
+@lru_cache(maxsize=1)
+def _round_trip_roads():
+    """Ids of the roads an ambulance can both reach and leave again for
+    the rest of the city. At the edges of the simulated map some roads
+    only lead off the map, or only come in and end there."""
+
+    net = _net()
+    hub = net.getEdge(next(iter(_hub_road())))
+    leading_back = net.getReachable(hub, vclass=VEHICLE_CLASS, useIncoming=True)
+    return _reachable_roads() & {edge.getID() for edge in leading_back}
+
+
+@lru_cache(maxsize=1)
+def _hub_road():
+    """{id} of the main road the reachability checks start from."""
+    roads = [
+        edge for edge in _net().getEdges()
+        if edge.getFunction() != "internal" and edge.allows(VEHICLE_CLASS)
+    ]
+    return {max(roads, key=lambda edge: (edge.getLaneNumber(), edge.getSpeed())).getID()}
+
+
+def _road_candidates(latitude, longitude, radius=SNAP_RADIUS_METERS):
+    """Every drivable road within radius of a point, nearest first:
+    [(distance, edge, position)]."""
 
     net = _net()
     x, y = net.convertLonLat2XY(longitude, latitude)
 
     with _SEARCH_LOCK:
-        neighbours = net.getNeighboringEdges(
-            x, y, SNAP_RADIUS_METERS, includeJunctions=False
-        )
+        neighbours = net.getNeighboringEdges(x, y, radius, includeJunctions=False)
 
     candidates = []
     for edge, distance in neighbours:
@@ -192,6 +212,14 @@ def _nearby_roads(latitude, longitude):
         candidates.append((distance, edge, max(0.0, position)))
 
     candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
+def _nearby_roads(latitude, longitude):
+    """Drivable roads near a point, nearest first:
+    [(edge, position, distance)]."""
+
+    candidates = _road_candidates(latitude, longitude)
     nearest = candidates[:NEARBY_ROADS]
     reachable = _reachable_roads()
     if not any(edge.getID() in reachable for _, edge, _ in nearest):
@@ -1197,8 +1225,31 @@ def hospital_road(latitude, longitude):
 # The whole journey: ambulance base -> patient -> hospital
 # ---------------------------------------------------------
 
+
+def _pickup_roads(latitude, longitude):
+    """Roads the ambulance may stop on for the patient: the nearest ones,
+    and when none of them can be both reached and left again (e.g. at
+    the edge of the map), also the nearest ones that can, within
+    PICKUP_REACH_METERS (the crew carries the patient there)."""
+
+    pickups = _nearby_roads(latitude, longitude)
+    usable = _round_trip_roads()
+    if any(edge.getID() in usable for edge, _, _ in pickups[:NEARBY_ROADS]):
+        return pickups
+    seen = {edge.getID() for edge, _, _ in pickups}
+    extra = [
+        (edge, position, distance)
+        for distance, edge, position in _road_candidates(latitude, longitude, PICKUP_REACH_METERS)
+        if edge.getID() in usable and edge.getID() not in seen
+    ][:NEARBY_ROADS]
+    return pickups + extra
+
 # Time at the scene to assess and load the patient (s).
 ON_SCENE_SECONDS = 180
+
+# How far the crew may carry the patient to a road the ambulance can both
+# reach and leave, when the nearest roads can't be used (map edges).
+PICKUP_REACH_METERS = 300
 
 # Carrying the patient on a stretcher to where the ambulance stops (m/s):
 # choosing where to stop, a stop 150 m away costs ~2.5 min, so the
@@ -1257,7 +1308,7 @@ def plan_journey(pickup_latitude, pickup_longitude, hospital_latitude,
         if not inside_area(latitude, longitude):
             raise PlanningError(f"{label} is outside the simulated area of central Pune.")
     starts = _nearby_roads(base["latitude"], base["longitude"])
-    pickups = _nearby_roads(pickup_latitude, pickup_longitude)
+    pickups = _pickup_roads(pickup_latitude, pickup_longitude)
     ends = _nearby_roads(hospital_latitude, hospital_longitude)
     if not starts or not pickups or not ends:
         raise PlanningError("No drivable road near the base, the patient or the hospital.")
@@ -1287,6 +1338,18 @@ def plan_journey(pickup_latitude, pickup_longitude, hospital_latitude,
         if best is None or total < best[0]:
             best = (total, to_patient, to_hospital)
     if best is None:
+        usable = next(
+            (round(distance) for distance, edge, _ in _road_candidates(pickup_latitude, pickup_longitude)
+             if edge.getID() in _round_trip_roads()),
+            None,
+        )
+        if usable is None or usable > PICKUP_REACH_METERS:
+            where = f"is {usable} m away" if usable is not None else "is more than 1.5 km away"
+            raise PlanningError(
+                "The patient is too far from a road an ambulance can reach and leave "
+                f"(e.g. at the edge of the simulated map): the nearest one {where}. "
+                "Move the pin onto a main road, a little further inside the area."
+            )
         raise PlanningError("No route from the ambulance via the patient to the hospital.")
     _, to_patient, to_hospital = best
 
