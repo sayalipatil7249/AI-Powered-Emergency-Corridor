@@ -50,6 +50,21 @@ class PoliceCall(Base):
 
     vehicles_waved: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Why police were called: "traffic" (jam on a stretch without
+    # signals), "accident", "blockage" (the ambulance was stuck) or
+    # "corridor" (sent ahead for a critical patient).
+    cause: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # How it went (set when the alert closes): ON_TIME (officers got
+    # there before the ambulance), LATE_HELD_UP (the ambulance got there
+    # first and had to wait), LATE_NO_HARM (got there first but drove
+    # through) or NOT_NEEDED (the jam cleared by itself).
+    outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Seconds the ambulance stood still between the call and the end of
+    # the alert.
+    held_up_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)

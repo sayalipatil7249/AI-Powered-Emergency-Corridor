@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
 from backend.services.police_station_service import (
+    call_outcome,
+    calls_summary,
     get_station,
     list_calls,
     list_stations,
@@ -57,11 +59,20 @@ def get_police_calls(limit: int = 50, db: Session = Depends(get_db)):
             "stopped_on_arrival": row.stopped_on_arrival,
             "stopped_after": row.stopped_after,
             "vehicles_waved": row.vehicles_waved,
+            "cause": row.cause,
+            "outcome": call_outcome(row),
+            "held_up_seconds": row.held_up_seconds,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
         for row in list_calls(db, min(max(limit, 1), 500))
     ]
+
+
+# Police on time: how every call went
+@router.get("/calls/summary")
+def get_police_calls_summary(db: Session = Depends(get_db)):
+    return calls_summary(db)
 
 
 # One station

@@ -63,6 +63,14 @@ def ensure_schema():
             connection.execute(text(
                 f"ALTER TABLE ambulance_requests ADD COLUMN IF NOT EXISTS {column} {kind}"
             ))
+        # How each police call went (backend/models/police_call.py).
+        for column, kind in {
+            "cause": "VARCHAR(20)", "outcome": "VARCHAR(20)",
+            "held_up_seconds": "FLOAT",
+        }.items():
+            connection.execute(text(
+                f"ALTER TABLE police_calls ADD COLUMN IF NOT EXISTS {column} {kind}"
+            ))
         # PostGIS: every event with a position (stops, signals, police)
         # as a map point, filled in from latitude / longitude by the
         # database, with a spatial index (used by stuck_spots()).

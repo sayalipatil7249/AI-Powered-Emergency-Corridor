@@ -66,11 +66,10 @@ def _phone(number):
 def message_for(alert):
     """What the officer hears."""
     minutes = max(1, round(alert["ambulance_eta_seconds"] / 60))
-    problem = (
-        "There is an accident blocking the road."
-        if alert.get("cause") == "accident"
-        else "Traffic there is heavy."
-    )
+    problem = {
+        "accident": "There is an accident blocking the road.",
+        "corridor": "It carries a critical patient: please hold traffic so it can pass.",
+    }.get(alert.get("cause"), "Traffic there is heavy.")
     return (
         "This is a test call from the Emergency Corridor simulation. "
         f"Alert for {alert['station']}. "

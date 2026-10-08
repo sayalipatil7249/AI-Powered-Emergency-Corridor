@@ -214,6 +214,9 @@ _ALERT_FIELDS = {
     "stopped_on_arrival": "stopped_on_arrival",
     "stopped_after": "stopped_after",
     "vehicles_waved": "vehicles_waved",
+    "cause": "cause",
+    "outcome": "outcome",
+    "held_up_seconds": "held_up_seconds",
 }
 
 
@@ -252,3 +255,40 @@ def list_calls(db, limit=50):
         .limit(limit)
         .all()
     )
+
+
+def call_outcome(row):
+    """How a police call went (PoliceCall.outcome). Calls saved before
+    outcomes were recorded: ON_TIME if officers got there, NOT_NEEDED if
+    cancelled, LATE if the ambulance passed first (whether it had to
+    wait is unknown); None while the alert is still open."""
+    if row.outcome:
+        return row.outcome
+    if row.stopped_on_arrival is not None:
+        return "ON_TIME"
+    if row.alert_status == "CANCELLED":
+        return "NOT_NEEDED"
+    if row.alert_status == "PASSED":
+        return "LATE"
+    return None
+
+
+def calls_summary(db):
+    """Police on time: {"on_time", "late_held_up", "late_no_harm",
+    "late", "not_needed", "open", "on_time_rate"} over every call.
+    on_time_rate: share of the calls where police were needed (the
+    ambulance came through the road) that they reached first."""
+    counts = {"ON_TIME": 0, "LATE_HELD_UP": 0, "LATE_NO_HARM": 0,
+              "LATE": 0, "NOT_NEEDED": 0, None: 0}
+    for row in db.query(PoliceCall).all():
+        counts[call_outcome(row)] += 1
+    reached = counts["ON_TIME"] + counts["LATE_HELD_UP"] + counts["LATE_NO_HARM"] + counts["LATE"]
+    return {
+        "on_time": counts["ON_TIME"],
+        "late_held_up": counts["LATE_HELD_UP"],
+        "late_no_harm": counts["LATE_NO_HARM"],
+        "late": counts["LATE"],
+        "not_needed": counts["NOT_NEEDED"],
+        "open": counts[None],
+        "on_time_rate": round(counts["ON_TIME"] / reached, 3) if reached else None,
+    }

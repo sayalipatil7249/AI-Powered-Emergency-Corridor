@@ -66,6 +66,23 @@ const ALERT_LABELS = {
   CANCELLED: "Not needed",
 };
 
+// How a police call went (police_station_service.call_outcome).
+const OUTCOME_LABELS = {
+  ON_TIME: "On time",
+  LATE_HELD_UP: "Late, ambulance waited",
+  LATE_NO_HARM: "Late, not needed",
+  LATE: "Late",
+  NOT_NEEDED: "Not needed",
+};
+
+// Why police were called.
+const CAUSE_LABELS = {
+  traffic: "Jam",
+  accident: "Accident",
+  blockage: "Ambulance stuck",
+  corridor: "Green corridor",
+};
+
 // embedded: only the live overview, for the dashboard (#/admin).
 function AdminPage({ embedded = false }) {
   const section = useAdminSection("#/admin/live");
@@ -78,6 +95,7 @@ function AdminPage({ embedded = false }) {
 
   const [priorityLog, reloadPriorityLog] = usePolled("/fleet/priority-log?limit=200");
   const [policeCalls] = usePolled("/police-stations/calls?limit=50");
+  const [policeSummary] = usePolled("/police-stations/calls/summary");
   const [stations, reloadStations] = usePolled("/police-stations/");
   const [phoneDrafts, setPhoneDrafts] = useState({});
 
@@ -395,6 +413,45 @@ function AdminPage({ embedded = false }) {
 
         )}
 
+        {section === "police" && policeSummary && !policeSummary.error && (
+        <section className="cr-card">
+          <h3 className="cr-subheading">Police on time</h3>
+          <div className="admin-tiles">
+            <div className="admin-tile">
+              <span className="admin-tile-label">On time</span>
+              <strong className="admin-tile-value">
+                {policeSummary.on_time_rate == null
+                  ? "--"
+                  : `${Math.round(policeSummary.on_time_rate * 100)}%`}
+              </strong>
+              <span className="admin-tile-sub">
+                {policeSummary.on_time} calls: police there before the ambulance
+              </span>
+            </div>
+            <div className="admin-tile">
+              <span className="admin-tile-label">Late, ambulance waited</span>
+              <strong className="admin-tile-value">{policeSummary.late_held_up}</strong>
+              <span className="admin-tile-sub">These raise a complaint</span>
+            </div>
+            <div className="admin-tile">
+              <span className="admin-tile-label">Late, not needed</span>
+              <strong className="admin-tile-value">
+                {policeSummary.late_no_harm + policeSummary.late}
+              </strong>
+              <span className="admin-tile-sub">
+                Ambulance got through anyway
+                {policeSummary.late > 0 && ` (${policeSummary.late} older calls not measured)`}
+              </span>
+            </div>
+            <div className="admin-tile">
+              <span className="admin-tile-label">Not needed</span>
+              <strong className="admin-tile-value">{policeSummary.not_needed}</strong>
+              <span className="admin-tile-sub">Jam cleared by itself</span>
+            </div>
+          </div>
+        </section>
+        )}
+
         {section === "police" && (
         <section className="cr-card">
           <h3 className="cr-subheading">Calls</h3>
@@ -410,7 +467,9 @@ function AdminPage({ embedded = false }) {
                     <th>Time</th>
                     <th>Station</th>
                     <th>Road</th>
+                    <th>Why</th>
                     <th>Alert</th>
+                    <th>Result</th>
                     <th>Call</th>
                   </tr>
                 </thead>
@@ -420,7 +479,9 @@ function AdminPage({ embedded = false }) {
                       <td>{clock(call.created_at)}</td>
                       <td>{call.station}</td>
                       <td>{call.road}</td>
+                      <td>{CAUSE_LABELS[call.cause] || "--"}</td>
                       <td>{ALERT_LABELS[call.alert_status] || call.alert_status}</td>
+                      <td>{OUTCOME_LABELS[call.outcome] || "--"}</td>
                       <td className="cr-muted">
                         {call.call_status || "--"}
                         {call.phone_called && ` · ${call.phone_called}`}

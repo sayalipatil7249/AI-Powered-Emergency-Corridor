@@ -72,6 +72,14 @@ INCIDENT_CLEAR_SECONDS = 45
 TYPICAL_AMBULANCE_SPEED = 7.0   # m/s
 INCIDENT_MARGIN_SECONDS = 60
 
+# Green corridor: for a Critical patient, police are sent ahead to the
+# stretches without signals (like Pune traffic police for organ
+# transport), without waiting for a jam. Sent once the ambulance is at
+# most this much (s) behind the time officers need to get there, so they
+# arrive just before it; at most this many such units out at once.
+CORRIDOR_MARGIN_SECONDS = 60
+MAX_CORRIDOR_UNITS = 2
+
 ACTIVE = ("ALERTED", "EN_ROUTE", "ON_SCENE")
 
 # Officers stuck in the queue this close to the jam park and walk.
@@ -244,15 +252,19 @@ class SignallessWatch:
 
             if active:
                 if (
-                    # An accident does not clear by itself: officers
-                    # stay on it until the ambulance is through.
-                    active.get("cause") != "accident"
+                    # An accident does not clear by itself, and green
+                    # corridor officers hold the road anyway: they stay
+                    # until the ambulance is through.
+                    active.get("cause") not in ("accident", "corridor")
                     and active["status"] != "ON_SCENE"
                     and stretch["state"] == "clear"
                     and now - stretch["clear_since"] >= STAND_DOWN_SECONDS
                 ):
                     self._close(active, now, "CANCELLED",
                                 "the traffic cleared by itself")
+                continue
+
+            if self._send_corridor(stretch, here, distance, now):
                 continue
 
             if (
@@ -276,6 +288,36 @@ class SignallessWatch:
                             now, ambulance_eta)
 
         self._check_stall(now, here)
+
+    def _send_corridor(self, stretch, here, distance, now):
+        """Green corridor (Critical patient): officers to this stretch
+        ahead of the ambulance, timed to get there just before it, jam
+        or not. Once per stretch. True when sent."""
+        if (
+            not self.urgent()
+            or not stretch["stations"]
+            or stretch.get("corridor_sent")
+            or sum(
+                1 for alert in self.alerts.values()
+                if alert.get("cause") == "corridor" and alert["status"] in ACTIVE
+            ) >= MAX_CORRIDOR_UNITS
+        ):
+            return False
+        first = max(stretch["start_index"], here)
+        if self._roads[first] in self.busy_roads():
+            return False
+        station, police_eta, roads = self._best_station(stretch, first)
+        # Planned at the ambulance's typical speed (it may be standing at
+        # a signal right now).
+        ambulance_eta = distance / TYPICAL_AMBULANCE_SPEED
+        # Too late to beat it (the jam alerts still cover that), or so
+        # early the officers would stand there for minutes.
+        if not police_eta <= ambulance_eta <= police_eta + CORRIDOR_MARGIN_SECONDS:
+            return False
+        stretch["corridor_sent"] = True
+        self._alert(stretch, first, station, police_eta, roads, now,
+                    ambulance_eta, cause="corridor")
+        return True
 
     # -------------------------------------------------------------
     # The ambulance is stuck: police to the front of its queue
@@ -535,7 +577,10 @@ class SignallessWatch:
             "speed_ratio": stretch["speed_ratio"],
             "ambulance_eta_seconds": round(ambulance_eta),
             "police_eta_seconds": round(police_eta),
-            "late": cause != "blockage" and police_eta + CLEAR_SECONDS > ambulance_eta,
+            "late": (
+                police_eta > ambulance_eta if cause == "corridor"
+                else cause != "blockage" and police_eta + CLEAR_SECONDS > ambulance_eta
+            ),
             "alerted_at": now,
             "unit_id": None,
             "unit_latitude": None,
@@ -552,6 +597,11 @@ class SignallessWatch:
             self._event(
                 f"Ambulance stuck at {road_name}. "
                 f"Police from {station['name']} coming, about {max(1, round(police_eta / 60))} min."
+            )
+        elif cause == "corridor":
+            self._event(
+                f"Green corridor: police from {station['name']} to hold {road_name} "
+                f"for the critical patient (about {max(1, round(police_eta / 60))} min away)."
             )
         else:
             self._event(
