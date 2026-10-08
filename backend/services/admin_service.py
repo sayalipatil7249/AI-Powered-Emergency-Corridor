@@ -22,7 +22,6 @@ from sqlalchemy import distinct, func, or_, text
 from backend.database import SessionLocal, engine
 from backend.models.ambulance_request import (
     DELAY_REASONS,
-    PLAN_STATUSES,
     REQUEST_STATUSES,
     AmbulanceRequest,
 )
@@ -120,7 +119,7 @@ def new_request_id(now=None, ambulance_number=None):
 def start_request(request_id, ambulance_id, start_name, hospital_name,
                   traffic_level, planned_seconds, distance_meters,
                   plan_status=None):
-    """The ambulance was dispatched. plan_status: one of PLAN_STATUSES
+    """The ambulance was dispatched. plan_status: one of ambulance_request.PLAN_STATUSES
     (why planned_seconds is or isn't there)."""
     if plan_status is None:
         plan_status = "OK" if planned_seconds is not None else "NO_ESTIMATE"

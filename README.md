@@ -229,8 +229,9 @@ network, a backup of v2, logs and a zip backup. It can be deleted once you no lo
 - **Python 3.11**
 - **Node.js 20+**
 - **PostgreSQL** with the **PostGIS** extension
-- **SUMO 1.27**, with the `SUMO_HOME` environment variable pointing at its install folder
-  (for example `C:\Program Files (x86)\Eclipse\Sumo` on Windows)
+- **SUMO 1.27**: installed by `pip install -r requirements.txt` (the `eclipse-sumo` package),
+  so there is nothing else to install. To use your own SUMO install instead, set `SUMO_HOME`
+  in `.env` (for example `C:\Program Files (x86)\Eclipse\Sumo` on Windows).
 
 ### 2. Database
 
@@ -262,6 +263,40 @@ cp .env.example .env        # then edit DATABASE_URL
 cd frontend
 npm install
 ```
+
+### 5. Settings (`.env`)
+
+Only `DATABASE_URL` is required; everything else is optional. `.env` is never committed
+(only `.env.example`).
+
+| Setting | Default | What it does |
+|---|---|---|
+| `DATABASE_URL` | (required) | PostgreSQL + PostGIS database, e.g. `postgresql://USER:PASSWORD@localhost:5432/emergency_corridor` |
+| `SUMO_GUI` | `0` | `1` also opens SUMO's own window (needs a screen; can hang on Apple Silicon Macs). The dashboard works either way. |
+| `SUMO_HOME` | found by itself | SUMO's install folder, only if you use your own SUMO instead of the pip package |
+| `GIVE_WAY` | `1` | `0` turns off drivers making room for the siren |
+| `SIM_AREA` | `original` | `2x` for the larger 5.9 × 4.7 km map |
+| `SIM_TRAFFIC_LEVEL` | live / normal | `light`, `normal` or `heavy`: always use this traffic level (handy for demos) |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Websites allowed to call the API (set to the dashboard's address on a server) |
+| `ANTHROPIC_API_KEY` | none | Claude: "Ask AI", "Describe the emergency" and the AI agent. Without it those features say they are off. |
+| `ASSISTANT_MODEL`, `ASSISTANT_EFFORT` | `claude-opus-5-5`, `low` | Model and effort for "Ask AI" and the AI intake |
+| `AGENT_MODEL`, `AGENT_EFFORT` | `claude-opus-5`, `low` | Model and effort for the AI supervisor agent |
+| `TOMTOM_API_KEY` | none | Live Pune traffic (digital twin) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | none | Real phone calls to police (test phones only) |
+| `POLICE_ALERT_PHONE` | none | The **test** phone that stands in for every police station (`+91` and 10 digits) |
+| `POLICE_CALLS` | `1` | `0` writes calls to the log instead of phoning |
+
+### 6. Running the tests
+
+From the project root, with the virtual environment active:
+
+```bash
+python -m unittest discover -s tests            # unit tests: routing, rescue, fleet, priority
+python -m scripts.tests.test_admin_data_quality  # admin figures (uses a throwaway database)
+```
+
+Neither needs SUMO, the backend or the real database. More checks are listed under
+[Helper scripts](#helper-scripts).
 
 ---
 
@@ -430,7 +465,7 @@ Checks in `scripts/tests/`:
 | Command | What it checks |
 |---|---|
 | `python -m scripts.tests.regression_check --save/--compare <file>` | Four fixed simulations give the same results after a refactor |
-| `python -m scripts.tests.test_admin_data_quality` | Admin KPIs: trips without an AI plan are not counted as on time |
+| `python -m scripts.tests.test_admin_data_quality` | Admin KPIs: trips without an AI plan are not counted as on time; interrupted trips stay out of the success rate; delay of late trips |
 | `python -m unittest discover -s tests` | Unit tests (`tests/`): route selection, critical rescue, fleet planning, junction priority |
 | `python -m scripts.tests.test_mcp` | MCP server end to end (backend must be running) |
 | `python -m scripts.tests.test_police_call` | One Twilio test call |
@@ -900,7 +935,8 @@ more, signals switched green, police alerts, accidents on its route, re-routes a
 other ambulances (`trip_events`), plus a route summary (`route_optimization_logs`). A trip that
 arrives is `COMPLETED`, with its delay against the AI trip-time estimate and a delay reason
 (the admin can correct it); a simulation stopped or failing before arrival records `CANCELLED`
-/ `FAILED`. Grievances (`grievances`) can be raised by users, drivers, hospitals or police and
+/ `FAILED`, and a trip cut off because the backend itself stopped is marked `INTERRUPTED` at the
+next start-up. Grievances (`grievances`) can be raised by users, drivers, hospitals or police and
 linked to a trip. The tables are created at start-up (`database/admin_tables.sql` has the SQL).
 
 **Camera** (top right of the map): **Follow** keeps the selected ambulance centred, **All** keeps
@@ -956,7 +992,7 @@ when the trip ends so the simulation never waits for the database):
 
 | Table | What it holds |
 |---|---|
-| `ambulance_requests` | One row per trip: start, hospital, status (`IN_PROGRESS / COMPLETED / CANCELLED / FAILED`), dispatch and arrival, response time, AI planned time and `plan_status`, delay and its reason |
+| `ambulance_requests` | One row per trip: start, hospital, status (`IN_PROGRESS / COMPLETED / CANCELLED / FAILED / INTERRUPTED`), dispatch and arrival, response time, AI planned time and `plan_status`, delay and its reason |
 | `route_optimization_logs` | Signals cleared, police alerts and police on scene, re-routes, accidents, fast arrival |
 | `trip_events` | Stops, signals, police, accidents and re-routes in time order, plus the planned route and the driven track |
 | `grievances` | Complaint tickets from users, drivers, hospitals or police |
@@ -977,20 +1013,24 @@ The admin page has a sidebar with these sections:
 
 What the figures show:
 
-- **KPIs:** total trips, success rate, on-time rate, average time to hospital and delay, open
+- **KPIs:** total trips, success rate, on-time rate, average time to hospital, **average delay
+  of late trips** (how late the trips over 1 min late were; "On time" says how many), open
   complaints, and for 108 trips where the time goes (to the patient, at the scene, to the
   hospital, handover). Trips without an AI planned time are counted separately, never as
-  "on time".
-- **Delay reasons** (`TRAFFIC`, `BAD_ROUTE`, `ACCIDENT`, set automatically; `VEHICLE_ISSUE`,
-  `DRIVER_DELAY`, `OTHER` set by an admin) and **requests / response time per day** (charts).
+  "on time" or in the delay. **Interrupted** trips (backend stopped mid-trip) are shown but
+  left out of the success rate.
+- **Charts:** delay reasons (`TRAFFIC`, `BAD_ROUTE`, `ACCIDENT`, set automatically;
+  `VEHICLE_ISSUE`, `DRIVER_DELAY`, `OTHER` set by an admin), signals and police, time by traffic
+  level, busiest hospitals, and recent trips (on time or late).
 - **Request log** with filters; an admin can correct a trip's delay reason, status or notes.
 - **Problem junctions:** where ambulances stood still longest.
 - **Trip page** (`#/admin/trip/<id>`): map with the planned route, the driven path and the
   events, plus a timeline.
-- **Grievances:** create, filter, search, change status and priority, add a resolution note.
+- **Complaints:** filter, search, change status and priority, add a resolution note; each
+  links to its trip.
 
 Filter by period with the last N days. Trips left `IN_PROGRESS` by a stopped backend are marked
-`FAILED` at the next start-up.
+`INTERRUPTED` at the next start-up (not counted in the success rate).
 
 ---
 

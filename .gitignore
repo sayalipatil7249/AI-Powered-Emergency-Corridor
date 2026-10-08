@@ -16,6 +16,14 @@ _archive/
 # Logs and OS files
 *.log
 .DS_Store
+Thumbs.db
+
+# SUMO output and temporary files (written by SUMO tools and test runs)
+tripinfos.xml
+stats.xml
+edgeData.xml
+*.rou.alt.xml
+*.passenger.trips.xml
 
 # Test phone numbers for police calls (personal numbers: never commit)
 police_contacts.json

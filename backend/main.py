@@ -6,6 +6,8 @@ from fastapi import FastAPI
 
 from backend.database import Base, engine
 
+# Every table model, imported so Base.metadata knows them all before
+# create_all() below (the names themselves are not used here).
 from backend.models.ambulance import Ambulance
 from backend.models.hospital import Hospital
 from backend.models.emergency import Emergency
