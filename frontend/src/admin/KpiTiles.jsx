@@ -44,6 +44,8 @@ function KpiTiles({ kpis }) {
   const byStatus = kpis.by_status || {};
   const stopped = (byStatus.CANCELLED || 0) + (byStatus.FAILED || 0);
   const finished = (byStatus.COMPLETED || 0) + stopped;
+  // Cut off by a backend restart: shown, but not in the success rate.
+  const interrupted = byStatus.INTERRUPTED || 0;
   // Trips the AI pre-trip model gave no planned time: on time and delay
   // are unknown for them, so they are left out of those figures.
   const withoutPlan = kpis.completed_without_plan || 0;
@@ -58,12 +60,12 @@ function KpiTiles({ kpis }) {
         <Tile
           label="Trips"
           value={kpis.total_requests}
-          sub={`${byStatus.COMPLETED || 0} reached the hospital${stopped ? ` · ${stopped} stopped early` : ""}`}
+          sub={`${byStatus.COMPLETED || 0} reached the hospital${stopped ? ` · ${stopped} stopped early` : ""}${interrupted ? ` · ${interrupted} interrupted by a restart` : ""}`}
         />
         <Tile
           label="Success rate"
           value={formatPercent(kpis.success_rate)}
-          sub={`${byStatus.COMPLETED || 0} of ${finished} finished trips reached the hospital`}
+          sub={`${byStatus.COMPLETED || 0} of ${finished} finished trips reached the hospital${interrupted ? " (interrupted trips left out)" : ""}`}
         />
         <Tile
           label="Avg time to hospital"
@@ -80,9 +82,13 @@ function KpiTiles({ kpis }) {
           sub={`Within 1 min of the expected time, of ${kpis.completed_with_plan ?? 0} planned trips${withoutPlanNote}`}
         />
         <Tile
-          label="Avg delay"
-          value={formatDuration(kpis.avg_delay_seconds)}
-          sub={`Beyond the expected time${withoutPlanNote}`}
+          label="Avg delay of late trips"
+          value={kpis.late_trips ? formatDuration(kpis.avg_late_delay_seconds) : "None late"}
+          sub={
+            kpis.late_trips
+              ? `How late the ${kpis.late_trips} late ${kpis.late_trips === 1 ? "trip was" : "trips were"}${withoutPlanNote}`
+              : `No trip was over 1 min late${withoutPlanNote}`
+          }
         />
         <Tile
           label="Open complaints"

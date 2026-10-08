@@ -82,7 +82,8 @@ def ensure_schema():
 def close_interrupted_requests():
     """
     Mark requests left IN_PROGRESS by an earlier run of the backend as
-    FAILED. Only called at startup, when no trip can be running: the
+    INTERRUPTED (not FAILED: the trip did not fail, the backend stopped;
+    the success rate leaves them out). Only called at startup, when no trip can be running: the
     simulation lives in this process, so a request still open now was
     cut off when the backend stopped (its finish_request never ran).
     Returns how many were closed.
@@ -96,7 +97,7 @@ def close_interrupted_requests():
         )
         now = datetime.now()
         for row in rows:
-            row.status = "FAILED"
+            row.status = "INTERRUPTED"
             row.notes = "The backend stopped while this trip was running."
             row.updated_at = now
         db.commit()
@@ -176,7 +177,8 @@ def finish_request(request_id, status, response_seconds=None,
                    stopped_seconds=None, stops=None, route=None, notes=None,
                    route_geometry=None, track=None, events=None, timings=None):
     """
-    The trip ended. status: COMPLETED, CANCELLED or FAILED.
+    The trip ended. status: COMPLETED, CANCELLED or FAILED
+    (INTERRUPTED is set by close_interrupted_requests at start-up).
     route (completed trips): {"optimal_route_used", "signals_total",
     "signals_cleared", "police_alerts", "police_on_scene", "reroutes",
     "incidents"} for the route optimization log.
@@ -319,7 +321,15 @@ def kpi_summary(db, days=None):
     on_time = with_plan.filter(
         AmbulanceRequest.delay_seconds <= ON_TIME_TOLERANCE_SECONDS
     ).count()
+    # How late the late trips were (On time already says how many were
+    # late; this says by how much). Trips without a plan have no delay.
+    late = with_plan.filter(AmbulanceRequest.delay_seconds > ON_TIME_TOLERANCE_SECONDS)
+    late_trips, avg_late_delay = late.with_entities(
+        func.count(), func.avg(AmbulanceRequest.delay_seconds)
+    ).one()
 
+    # Interrupted trips (backend stopped mid-trip) are not counted: they
+    # say nothing about whether the ambulance would have made it.
     finished = sum(counts.get(status, 0) for status in ("COMPLETED", "CANCELLED", "FAILED"))
     total_completed = counts.get("COMPLETED", 0)
 
@@ -341,6 +351,8 @@ def kpi_summary(db, days=None):
         "completed_without_plan": total_completed - planned_trips,
         "avg_response_seconds": rounded(averages[0]),
         "avg_delay_seconds": rounded(averages[1]),
+        "late_trips": late_trips,
+        "avg_late_delay_seconds": rounded(avg_late_delay),
         "avg_planned_seconds": rounded(averages[2]),
         "open_grievances": open_grievances,
         # The 108 timeline (trips recorded since it was added)

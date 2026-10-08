@@ -60,6 +60,7 @@ const STATUS_TONES = {
   IN_PROGRESS: "neutral",
   CANCELLED: "warning",
   FAILED: "critical",
+  INTERRUPTED: "neutral",
 };
 
 // Every request with its route log; the delay reason can be corrected.
@@ -126,7 +127,10 @@ export function RequestsTable({ requests, delayReasons, onChangeReason, busyId }
                     </span>
                   </td>
                   <td>
-                    <span className={`admin-status tone-${STATUS_TONES[row.status] || "neutral"}`}>
+                    <span
+                      className={`admin-status tone-${STATUS_TONES[row.status] || "neutral"}`}
+                      title={row.status === "INTERRUPTED" ? "The backend stopped while this trip was running (not counted in the success rate)" : undefined}
+                    >
                       {label(row.status)}
                     </span>
                   </td>

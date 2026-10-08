@@ -7,6 +7,7 @@ charset-normalizer==3.5.1
 click==8.5.0
 cloudpickle==3.1.2
 docstring-parser==0.18.0
+eclipse-sumo==1.27.1
 fastapi==0.141.1
 GeoAlchemy2==0.20.0
 greenlet==3.5.5
@@ -39,6 +40,10 @@ typing_extensions==4.16.0
 urllib3==2.7.0
 uvicorn==0.52.4
 websockets==17.1
+
+# eclipse-sumo is the SUMO traffic simulator itself, so a fresh
+# `pip install -r requirements.txt` is enough (or install SUMO 1.27
+# yourself and set SUMO_HOME in .env).
 
 # Training the AI models and running the AI agent (python -m agent.run)
 # also need: pip install pandas matplotlib langgraph

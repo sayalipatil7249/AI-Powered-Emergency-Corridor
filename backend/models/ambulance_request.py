@@ -7,7 +7,10 @@ from backend.database import Base
 
 
 # Request statuses and delay reasons (backend/services/admin_service.py).
-REQUEST_STATUSES = ("IN_PROGRESS", "COMPLETED", "CANCELLED", "FAILED")
+# INTERRUPTED: the backend stopped (restart, crash, laptop shut) while
+# the trip was running; not a failure of the trip itself, so it is left
+# out of the success rate.
+REQUEST_STATUSES = ("IN_PROGRESS", "COMPLETED", "CANCELLED", "FAILED", "INTERRUPTED")
 DELAY_REASONS = (
     "NONE",            # on time
     "TRAFFIC",         # queues / jams on the route
@@ -46,7 +49,8 @@ class AmbulanceRequest(Base):
 
     hospital_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # IN_PROGRESS -> COMPLETED, CANCELLED (stopped) or FAILED (error)
+    # IN_PROGRESS -> COMPLETED, CANCELLED (stopped), FAILED (error) or
+    # INTERRUPTED (the backend stopped mid-trip; set at the next start-up)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
     # light / normal / heavy

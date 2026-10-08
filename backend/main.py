@@ -100,7 +100,7 @@ try:
     closed = admin_service.close_interrupted_requests()
     if closed:
         logging.getLogger(__name__).warning(
-            "Marked %d interrupted trip(s) as FAILED.", closed
+            "Marked %d trip(s) cut off by the last backend stop as INTERRUPTED.", closed
         )
 except Exception as error:
     logging.getLogger(__name__).warning("Could not update the admin tables: %s", error)
