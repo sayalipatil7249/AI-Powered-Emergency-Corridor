@@ -44,6 +44,19 @@ HANDOVER_UNANNOUNCED_SECONDS = 480
 STUCK_TICKET_SECONDS = 120
 LATE_TICKET_SECONDS = 300
 
+# Police who got there after the ambulance only count as late (and lead
+# to a complaint) if the ambulance stood still this long meanwhile (s);
+# a trip with this much waiting in total gets a MEDIUM complaint.
+POLICE_HELD_UP_SECONDS = 30
+POLICE_TICKET_MEDIUM_SECONDS = 120
+
+OUTCOME_TEXT = {
+    "ON_TIME": "police got there before the ambulance",
+    "LATE_HELD_UP": "police were late and the ambulance had to wait",
+    "LATE_NO_HARM": "police not needed in the end: the ambulance got through without waiting",
+    "NOT_NEEDED": "police not needed in the end",
+}
+
 # Off the road this long without arriving (s): treated as arrived, so a
 # vehicle SUMO dropped does not wait for ever.
 MAX_MISSING_SECONDS = 300
@@ -133,6 +146,8 @@ class AmbulanceRun:
         self.cleared_signal_ids = set()
         self.trip_alerts = set()
         self.police_on_scene = set()
+        self._stopped_at_alert = {}   # alert id -> stopped_seconds when called
+        self.police_late = []         # [(road, station, seconds held up)]
         self._giving_way_at = None
         self.accidents = 0  # simulated accidents on this ambulance's route
 
@@ -310,6 +325,7 @@ class AmbulanceRun:
 
         # A stop = slowing below walking pace after moving.
         self._follow_pickup(now, snapshot)
+        snapshot["driving_seconds"] = self._driving_seconds(snapshot)
 
         # Standing at the patient is part of the job, not a stop in traffic.
         moving = snapshot["speed"] > 0.5 or self.at_patient
@@ -511,6 +527,7 @@ class AmbulanceRun:
         self.referee.forget(self.vehicle_id)
         self.response.close()
         self.police_watch.close(now)
+        self._police_complaint()
         self.arrival_time = now
         self.snapshot = {
             **self.snapshot,
@@ -612,22 +629,25 @@ class AmbulanceRun:
         """A police alert for this ambulance: count it, put it on the
         trip's timeline, then let the service phone / log it."""
         status = alert["status"]
+        alert_id = alert["alert_id"]
         if status == "ALERTED":
-            self.trip_alerts.add(alert["alert_id"])
+            self.trip_alerts.add(alert_id)
+            self._stopped_at_alert[alert_id] = self.stopped_seconds
         elif status == "ON_SCENE":
-            self.police_on_scene.add(alert["alert_id"])
-        elif (
-            status == "PASSED" and alert["alert_id"] in self.trip_alerts
-            and alert["alert_id"] not in self.police_on_scene
-        ):
-            # Called, but the ambulance got there first.
-            admin_service.auto_grievance(
-                "POLICE",
-                f"Police did not reach {alert['road']} before {self.label} passed",
-                description=f"{alert['station']} was called; the ambulance got there first.",
-                request_id=self.trip_request_id,
-                priority="LOW",
-            )
+            self.police_on_scene.add(alert_id)
+        elif status in ("PASSED", "CANCELLED") and alert_id in self.trip_alerts:
+            held_up = self.stopped_seconds - self._stopped_at_alert.get(alert_id, self.stopped_seconds)
+            if alert_id in self.police_on_scene:
+                outcome = "ON_TIME"
+            elif status == "CANCELLED":
+                outcome = "NOT_NEEDED"
+            elif held_up >= POLICE_HELD_UP_SECONDS:
+                outcome = "LATE_HELD_UP"
+                # One complaint for the whole trip (_police_complaint).
+                self.police_late.append((alert["road"], alert["station"], held_up))
+            else:
+                outcome = "LATE_NO_HARM"
+            alert = {**alert, "outcome": outcome, "held_up_seconds": held_up}
 
         if self.recorder is not None:
             if status == "ALERTED":
@@ -642,6 +662,8 @@ class AmbulanceRun:
             elif status in ("PASSED", "CANCELLED"):
                 when, title = alert.get("closed_at"), f"Police alert closed: {alert['road']}"
                 detail = alert.get("closed_reason")
+                if alert.get("outcome"):
+                    detail = f"{detail} ({OUTCOME_TEXT[alert['outcome']]})"
             else:
                 when = None
             if when is not None:
@@ -651,6 +673,25 @@ class AmbulanceRun:
                 )
 
         self.on_police_alert(alert)
+
+    def _police_complaint(self):
+        """One complaint per trip for police who came too late while the
+        ambulance was held up (none when it got through anyway)."""
+        if not self.police_late:
+            return
+        waited = sum(seconds for _, _, seconds in self.police_late)
+        roads = "; ".join(
+            f"{road} ({station}): ambulance waited {_duration(seconds)}"
+            for road, station, seconds in self.police_late
+        )
+        admin_service.auto_grievance(
+            "POLICE",
+            f"Police late on {len(self.police_late)} of {len(self.trip_alerts)} "
+            f"call{'s' if len(self.trip_alerts) != 1 else ''} on {self.label}'s trip",
+            description=f"The ambulance got there before the police and had to wait. {roads}.",
+            request_id=self.trip_request_id,
+            priority="MEDIUM" if waited >= POLICE_TICKET_MEDIUM_SECONDS else "LOW",
+        )
 
     def record_event(self, now, kind, title, **fields):
         """An event from outside (e.g. a simulated accident) for this trip."""
@@ -776,6 +817,17 @@ class AmbulanceRun:
                 found = found or alert
         return found
 
+    def _driving_seconds(self, snapshot):
+        """Trip time without the time at the patient (to compare with a
+        normal car doing the same drive)."""
+        trip = snapshot.get("trip_time_seconds")
+        reached = getattr(self, "patient_reached_at", None)
+        if trip is None or reached is None:
+            return trip
+        left = getattr(self, "left_patient_at", None)
+        scene = (left if left is not None else self.depart_time + trip) - reached
+        return round(trip - max(scene, 0), 1)
+
     def summary(self):
         """This ambulance for the fleet list and the map."""
 
@@ -787,7 +839,11 @@ class AmbulanceRun:
             self.phase == "driving" and snapshot.get("speed", 1) < 0.5
             and not getattr(self, "at_patient", False)
         ):
-            if self.engine.give_way:
+            if getattr(self, "missing_since", None) is not None:
+                # SUMO lifts a vehicle stuck for 5 min out of the jam and
+                # puts it back further along the route.
+                delay_reason = "stuck over 5 min, squeezing past the jam"
+            elif self.engine.give_way:
                 delay_reason = (
                     f"letting {self.engine.give_way['give_way_to']} go first "
                     f"at {self.engine.give_way['signal_name']}"
@@ -831,6 +887,7 @@ class AmbulanceRun:
             "eta_seconds": snapshot.get("eta_seconds"),
             "distance_left_meters": snapshot.get("distance_left_meters"),
             "trip_time_seconds": snapshot.get("trip_time_seconds"),
+            "driving_seconds": snapshot.get("driving_seconds"),
             "stops": snapshot.get("stops"),
             "delay_reason": delay_reason,
             "route": self.route_geometry,
@@ -866,3 +923,9 @@ class AmbulanceRun:
             "pre_alert": getattr(self, "pre_alert", None),
             "diverted_from": getattr(self, "diverted_from", None),
         }
+
+
+def _duration(seconds):
+    """90 -> "1 min 30 s"."""
+    minutes, seconds = divmod(round(seconds), 60)
+    return f"{minutes} min {seconds} s" if minutes else f"{seconds} s"

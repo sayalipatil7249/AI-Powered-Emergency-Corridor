@@ -5,9 +5,10 @@ const LEVEL_LABELS = {
 };
 
 // Summary of the live TomTom traffic the simulation is copying.
-// tripRunning: the car-time line is about the running trip, so it is
-// hidden before a trip starts.
-function LiveTrafficCard({ live, tripRunning = false }) {
+// ambulance: the running trip. The car-time line is about it, so it is
+// hidden before a trip starts; the ambulance's own driving time (without
+// the stop at the patient) is shown next to it for a fair comparison.
+function LiveTrafficCard({ live, ambulance = null }) {
   if (!live) {
     return null;
   }
@@ -23,10 +24,12 @@ function LiveTrafficCard({ live, tripRunning = false }) {
         {live.closures > 0 &&
           ` · ${live.closures} ${live.closures === 1 ? "road" : "roads"} closed`}
       </p>
-      {tripRunning && live.car_minutes != null && (
+      {ambulance && live.car_minutes != null && (
         <p className="muted">
           A normal car would take about {Math.round(live.car_minutes)} min for
-          this trip now
+          this drive now
+          {ambulance.driving_seconds != null &&
+            ` · ambulance so far ${Math.round(ambulance.driving_seconds / 60)} min driving (not counting time at the patient)`}
         </p>
       )}
       <span className="live-source">From TomTom</span>

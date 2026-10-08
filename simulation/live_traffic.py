@@ -237,10 +237,12 @@ def fetch_snapshot(points):
     }
 
 
-def car_travel_minutes(start, end):
-    """Live travel time (minutes) for a normal car from start to end."""
+def car_travel_minutes(start, end, via=None):
+    """Live travel time (minutes) for a normal car from start to end,
+    through via (the patient's pickup) when given."""
 
-    points = f"{start[0]:.5f},{start[1]:.5f}:{end[0]:.5f},{end[1]:.5f}"
+    stops = [start, via, end] if via else [start, end]
+    points = ":".join(f"{lat:.5f},{lon:.5f}" for lat, lon in stops)
     try:
         response = requests.get(
             ROUTING_URL.format(points=points),

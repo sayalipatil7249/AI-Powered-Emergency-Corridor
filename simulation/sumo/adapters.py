@@ -725,12 +725,14 @@ _QUEUE_SPEED = 1.0
 _PULL_OVER_ROAD_TYPES = ("trunk", "primary", "secondary", "tertiary")
 
 # No pulling over this close to the junction ahead: there is no room
-# at the stop line (m).
-_JUNCTION_CLEARANCE_METERS = 20
+# at the stop line (m). Kept small: the cars nearest the junction are
+# the ones holding the ambulance up.
+_JUNCTION_CLEARANCE_METERS = 8
 
 # A driver who pulled over rejoins once the siren vehicle has passed,
-# and after this long at the latest (s, fail-safe).
-_PULL_OVER_SECONDS = 60
+# and after this long at the latest (s, fail-safe). Long enough for an
+# ambulance stuck in a slow queue to reach and pass them.
+_PULL_OVER_SECONDS = 180
 
 # Drivers stuck inside a junction this close ahead of a siren push on
 # into any gap (ignoring right of way, keeping a safe distance), like

@@ -233,6 +233,14 @@ class SimulationService:
         if 1 + len(extra) > MAX_AMBULANCES:
             raise ValueError(f"At most {MAX_AMBULANCES} ambulances at once in this demo.")
 
+        # Every patient is already at a hospital (the trips are saved);
+        # only handovers and drives back to the station are left. A new
+        # call should not wait for them: end that run now.
+        if self.running and self.trips_done():
+            self.running = False
+            if self.thread is not None:
+                self.thread.join(timeout=15)
+
         if self.running:
             return {"status": "already_running"}
 
@@ -260,6 +268,11 @@ class SimulationService:
         self.thread.start()
 
         return {"status": "starting"}
+
+    def trips_done(self):
+        """True when every ambulance of this run reached its hospital."""
+        runs = list(self.runs)
+        return bool(runs) and all(run.phase == "arrived" for run in runs)
 
     def stop(self):
         """Ask the simulation to stop after the current step."""
@@ -779,7 +792,9 @@ class SimulationService:
         if alert["status"] == "ALERTED":
             police_notifier.alert(alert)  # phones the station, saves the alert
             self.add_agent_message(
-                f"Called {alert['station']} to clear {alert['road']}. "
+                f"Called {alert['station']} to "
+                f"{'hold' if alert.get('cause') == 'corridor' else 'clear'} {alert['road']}"
+                f"{' (green corridor)' if alert.get('cause') == 'corridor' else ''}. "
                 f"Ambulance is about {max(1, round(alert['ambulance_eta_seconds'] / 60))} min away.",
                 kind="police",
             )
@@ -941,7 +956,11 @@ class SimulationService:
         snapshot = live_traffic.fetch_snapshot(
             live_traffic.probe_points(geometry)
         )
-        car_minutes = live_traffic.car_travel_minutes(geometry[0], geometry[-1])
+        # A 108 trip goes station -> patient -> hospital (the station can be
+        # the hospital itself), so the car drives through the pickup.
+        pickup = self.trip.get("pickup")
+        via = (pickup["latitude"], pickup["longitude"]) if pickup else None
+        car_minutes = live_traffic.car_travel_minutes(geometry[0], geometry[-1], via)
         return snapshot, car_minutes
 
     def _load_live_preview(self):

@@ -848,6 +848,7 @@ function ChaseView({
   const [following, setFollowing] = useState(true);
   // Next camera move sets the chase zoom and tilt (start / resume).
   const resetCamera = useRef(true);
+  const buildingsSeeThrough = useRef(false);
 
   // Redraw when the view changes size (e.g. the map is expanded).
   useEffect(() => {
@@ -986,6 +987,19 @@ function ChaseView({
 
     map.getSource("ambulance").setData(ambulanceGeoJson(ambulance));
     map.getSource("ambulance-point").setData(ambulancePointGeoJson(ambulance));
+
+    // A building drawn over the ambulance (e.g. an elevated metro station
+    // that the map data extrudes from the ground) would hide it: make the
+    // buildings see-through while that is the case.
+    if (ambulance?.latitude != null) {
+      const point = map.project([ambulance.longitude, ambulance.latitude]);
+      const covered =
+        map.queryRenderedFeatures(point, { layers: ["buildings-3d"] }).length > 0;
+      if (covered !== buildingsSeeThrough.current) {
+        buildingsSeeThrough.current = covered;
+        map.setPaintProperty("buildings-3d", "fill-extrusion-opacity", covered ? 0.3 : 0.9);
+      }
+    }
 
     if (!following) return;
 

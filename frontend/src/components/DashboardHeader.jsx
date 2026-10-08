@@ -82,7 +82,7 @@ function DashboardHeader({
         <button
           className="button button-primary"
           onClick={onStartSimulation}
-          disabled={starting || running || startDisabled}
+          disabled={starting || startDisabled}
         >
           {starting ? "Starting…" : "Start"}
         </button>

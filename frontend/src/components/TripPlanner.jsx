@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import Collapsible from "./Collapsible";
 import ConditionSelect from "./ConditionSelect";
@@ -55,6 +55,13 @@ function TripPlanner({
   // family can ask for a private one.
   const [governmentOnly, setGovernmentOnly] = useState(false);
   const bookedKey = booked.join("|");
+  // A hospital the user picked by hand for this patient: kept until the
+  // patient, condition or preference changes (automatic calls don't
+  // replace it; "Call hospitals again" does).
+  const patientKey = start
+    ? `${start.latitude},${start.longitude}|${condition}|${governmentOnly}`
+    : null;
+  const handPicked = useRef(null);
 
   useEffect(() => {
     if (disabled || !condition) return undefined;
@@ -72,8 +79,10 @@ function TripPlanner({
     return () => controller.abort();
   }, [apiUrl, condition, start, disabled, governmentOnly]);
 
-  const callHospitals = async () => {
+  const callHospitals = async ({ automatic = false } = {}) => {
     if (!start || !condition) return;
+    if (automatic && handPicked.current === patientKey) return;
+    handPicked.current = null;
     try {
       setCalling(true);
       const response = await fetch(`${apiUrl}/plan/call-hospitals`, {
@@ -108,7 +117,7 @@ function TripPlanner({
     // The demo trip keeps its own hospital (Ruby Hall Clinic).
     if (disabled || !start || !condition || start.demo || start.keepHospital) return undefined;
     // Shortly after the last change, so quick changes make one call.
-    const timer = setTimeout(callHospitals, 300);
+    const timer = setTimeout(() => callHospitals({ automatic: true }), 300);
     return () => clearTimeout(timer);
     // Only when the patient, condition, bookings or preference change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -259,9 +268,12 @@ function TripPlanner({
         condition={condition}
         canTreat={!hospital || chosenListed}
         disabled={disabled}
-        onChange={(item) =>
-          onHospitalChange(hospitals.find((entry) => entry.name === item.name) || item)
-        }
+        onChange={(item) => {
+          handPicked.current = patientKey;
+          // The calls were about another hospital.
+          setCalls(null);
+          onHospitalChange(hospitals.find((entry) => entry.name === item.name) || item);
+        }}
       />
 
       {start && (
@@ -269,7 +281,7 @@ function TripPlanner({
           <button
             className="link-button"
             disabled={disabled || calling}
-            onClick={callHospitals}
+            onClick={() => callHospitals()}
           >
             {calling ? "Calling hospitals…" : "📞 Call hospitals again"}
           </button>

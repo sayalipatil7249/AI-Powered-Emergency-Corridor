@@ -506,6 +506,12 @@ function App() {
 
   const ambulance = simulationState?.ambulance;
   const ambulances = simulationState?.ambulances || [];
+  // Every patient is at a hospital: only handovers and drives back to the
+  // station are left, so a new trip can be planned and started (Start
+  // ends that run first).
+  const tripsDone =
+    running && ambulances.length > 0 && ambulances.every((item) => item.status === "arrived");
+  const locked = running && !tripsDone;
   const selectedRun = ambulances.find((item) => item.vehicle_id === selectedAmbulanceId)
     || ambulances[0];
   const selectedId = selectedRun?.vehicle_id || selectedAmbulanceId;
@@ -529,7 +535,7 @@ function App() {
   });
 
   // A new plan (not yet started) replaces the last trip on screen.
-  const showPlan = !running && plan && !planStarted;
+  const showPlan = !locked && plan && !planStarted;
 
   // Names come from the running / last trip, otherwise from the planner.
   const liveTrip =
@@ -565,7 +571,7 @@ function App() {
         hospital:
           tripHospital && [tripHospital.latitude, tripHospital.longitude],
       };
-  const showFleetPreview = !running && !planStarted && bookings.length > 0;
+  const showFleetPreview = !locked && !planStarted && bookings.length > 0;
   const previewRoutes = showFleetPreview && previewReady ? fleetPreview.ambulances : [];
   const previewNumber = Number(selectedAmbulanceId.slice(-2)) || 1;
   const selectedPreview = previewRoutes.find((item) => item.number === previewNumber);
@@ -607,7 +613,7 @@ function App() {
         onStartSimulation={startSimulation}
         onStopSimulation={stopSimulation}
         starting={starting}
-        startDisabled={bookings.length > 0 && !previewReady}
+        startDisabled={locked || (bookings.length > 0 && !previewReady)}
         stopping={stopping}
         running={running}
         tripLabel={selectedPreview
@@ -667,8 +673,8 @@ function App() {
           area={area}
           liveTraffic={simulationState?.live_traffic}
           hospitals={hospitals}
-          onSetStart={running ? null : changeStart}
-          onSetDestination={running ? null : changeHospital}
+          onSetStart={locked ? null : changeStart}
+          onSetDestination={locked ? null : changeHospital}
           pickMode={pickMode}
           onPick={(point) =>
             changeStart({
@@ -701,7 +707,7 @@ function App() {
           }
           planner={
             <>
-            <EmergencyIntake apiUrl={API_URL} disabled={starting || running} onFill={fillFromAi} />
+            <EmergencyIntake apiUrl={API_URL} disabled={starting || locked} onFill={fillFromAi} />
             <TripPlanner
               key={tripStart?.name || "no-start"}
               apiUrl={API_URL}
@@ -737,7 +743,7 @@ function App() {
           }
           fleet={
             <>
-            {!running && (
+            {!locked && (
               <BookingList
                 bookings={bookings}
                 preview={previewReady ? fleetPreview : null}

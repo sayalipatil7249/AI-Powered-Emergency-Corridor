@@ -97,7 +97,10 @@ def choose(fleet, busy, critical, latitude, longitude, seconds_to):
         if unit["id"] in busy:
             rows.append({**_row(unit, None), "status": "Busy with another patient"})
             continue
-        if len(free) >= CANDIDATES:
+        # The nearest few, plus the nearest free ALS one: otherwise five
+        # BLS stations nearby would hide every ALS ambulance.
+        has_als = any(item["kind"] == "ALS" for item in free)
+        if len(free) >= CANDIDATES and (unit["kind"] != "ALS" or has_als):
             continue
         seconds = seconds_to(unit)
         if seconds is None:

@@ -41,7 +41,7 @@ function LiveStatusPanel({
         </button>
       )}
 
-      <LiveTrafficCard live={liveTraffic} tripRunning={Boolean(ambulance)} />
+      <LiveTrafficCard live={liveTraffic} ambulance={ambulance} />
       {driving && (
         <>
           <ResponseCard response={response} />
