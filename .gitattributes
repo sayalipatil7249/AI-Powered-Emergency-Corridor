@@ -1,0 +1,18 @@
+# Line endings: text files are stored with LF, so files saved on Windows
+# (CRLF) don't show up as changed. Windows batch files keep CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# Binary files: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.gz binary
+*.zip binary
+*.joblib binary
+*.pkl binary
+*.woff binary
+*.woff2 binary
