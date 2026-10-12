@@ -36,11 +36,12 @@ const SOURCE_LABELS = {
 
 function callText(call) {
   if (!call) return null;
+  const phone = "Phone ";
   const label = CALL_LABELS[call.status] || call.status;
   const source = SOURCE_LABELS[call.source];
   const text = call.to
-    ? `📞 ${call.to}${source ? ` (${source})` : ""} · ${label}`
-    : `📞 ${label}`;
+    ? `${phone}${call.to}${source ? ` (${source})` : ""} · ${label}`
+    : `${phone}${label}`;
   // Why a call failed (e.g. a number not verified in Twilio).
   return call.status === "failed" && call.detail
     ? `${text} · ${call.detail}`

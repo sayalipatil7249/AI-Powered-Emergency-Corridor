@@ -118,7 +118,7 @@ function AdminDashboard() {
         )}
 
         {section === "complaints" ? (
-          options && <GrievancePanel options={options} onChanged={refresh} />
+          <GrievancePanel onChanged={refresh} />
         ) : !data ? (
           !error && <p className="admin-empty">Loading…</p>
         ) : (

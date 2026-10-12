@@ -1,0 +1,37 @@
+{
+  "rows": {
+    "train": 1500000,
+    "test": 1022876
+  },
+  "test_seeds": [
+    7,
+    8
+  ],
+  "by_horizon": {
+    "60": {
+      "ai_model": 6.0,
+      "now": 9.31,
+      "usual": 7.32
+    },
+    "120": {
+      "ai_model": 6.24,
+      "now": 9.83,
+      "usual": 7.42
+    },
+    "240": {
+      "ai_model": 6.52,
+      "now": 10.44,
+      "usual": 7.58
+    },
+    "480": {
+      "ai_model": 6.86,
+      "now": 10.94,
+      "usual": 7.94
+    }
+  },
+  "all_horizons_seconds_error": {
+    "ai_model": 6.41,
+    "now": 10.14,
+    "usual": 7.57
+  }
+}

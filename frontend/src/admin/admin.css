@@ -666,3 +666,158 @@ button.trip-title:hover {
   color: var(--accent);
   font-weight: 700;
 }
+
+/* ================= Complaints: simple cards ================= */
+
+.complaints-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.complaints-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.complaints-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.complaints-tabs button {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.complaints-tabs button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.complaints-controls input[type="search"] {
+  min-width: 200px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.complaint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.complaint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--muted);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.complaint.priority-high { border-left-color: var(--red); }
+.complaint.priority-medium { border-left-color: var(--ready); }
+.complaint.solved { opacity: 0.85; border-left-color: var(--green); }
+
+.complaint-top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.complaint-priority {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.complaint.priority-high .complaint-priority { color: var(--text-red); }
+.complaint.priority-medium .complaint-priority { color: var(--text-amber); }
+
+.complaint-subject {
+  flex: 1;
+  font-size: 15px;
+}
+
+.complaint-time,
+.complaint-meta {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.complaint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.complaint-trip {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.complaint-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.complaint-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.complaint-actions input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.complaint-solved {
+  flex: 1;
+  color: var(--text-green);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .complaint-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import Collapsible from "./Collapsible";
 import ConditionSelect from "./ConditionSelect";
 import { ambulanceColor, legLabel, LEVEL_CLASS } from "../fleet";
@@ -42,8 +40,8 @@ function hospitalLine(ambulance) {
 
 // Every ambulance on the road, one compact row each: priority, stage,
 // ETA and what it is waiting for. Details (view buttons, the patient's
-// condition, the route note) and test tools fold out on demand; the
-// referee's decisions are on the Admin page.
+// condition, the route note) fold out on demand; the referee's decisions
+// are on the Admin page; test tools are in their own panel.
 function FleetPanel({
   ambulances = [],
   selectedAmbulanceId,
@@ -51,26 +49,20 @@ function FleetPanel({
   onChase,
   conditions,
   running,
-  maxAmbulances = 10,
   onConditionChange,
-  onHospitalDeclines,
   onReportProblem,
   onCallPolice,
-  onAddCrossing,
-  onAddPlanned,
-  onSimulateIncident,
-  incidentBusy = false,
+  // crewHref(ambulance) -> link to that ambulance's crew screen, shown
+  // on each row once it has been sent.
+  crewHref = null,
   busy,
   error,
 }) {
-  const [newCondition, setNewCondition] = useState("stable");
 
   if (ambulances.length === 0) {
     return null;
   }
 
-  const firstDriving = ambulances[0]?.status === "driving";
-  const full = ambulances.length >= maxAmbulances;
 
   // One short line for what an ambulance is waiting for, if anything.
   const waitingFor = (ambulance) => {
@@ -112,6 +104,19 @@ function FleetPanel({
               <span className="fleet-status">{statusText(ambulance)}</span>
             </div>
 
+            {crewHref && (
+              <a
+                className="crew-screen-link"
+                href={crewHref(ambulance)}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => event.stopPropagation()}
+                title="The tablet in this ambulance: what its crew sees"
+              >
+                Open crew screen for {ambulance.unit?.id || ambulance.label}
+              </a>
+            )}
+
             {hospitalLine(ambulance) && (
               <span className="fleet-line hospital-line">{hospitalLine(ambulance)}</span>
             )}
@@ -133,7 +138,7 @@ function FleetPanel({
                 }}
                 title="Stuck? Call the police station that can reach you fastest (at most once every 2 min)"
               >
-                🚓 Call police: we&apos;re stuck
+                Call police: we&apos;re stuck
               </button>
             )}
 
@@ -169,14 +174,6 @@ function FleetPanel({
                     108 {ambulance.unit.id} · {ambulance.unit.kind_label} · from {ambulance.unit.station}
                   </span>
                 )}
-                {running && ambulance.status !== "arrived" && onHospitalDeclines && (
-                  <button type="button" className="button button-secondary"
-                    disabled={busy}
-                    onClick={() => onHospitalDeclines(ambulance.vehicle_id)}
-                    title="Test: pretend the hospital is now full. The ambulance goes to another hospital.">
-                    Test: hospital is full
-                  </button>
-                )}
                 {onReportProblem && ambulance.request_id && (
                   <button type="button" className="button button-secondary"
                     onClick={() => onReportProblem(ambulance.request_id)}>
@@ -192,54 +189,6 @@ function FleetPanel({
         ))}
       </ul>
 
-      {running && (
-        <Collapsible title="Test tools" hint="accident, more ambulances">
-          {onSimulateIncident && (
-            <button
-              type="button"
-              className="button incident-button"
-              onClick={onSimulateIncident}
-              disabled={incidentBusy || !firstDriving}
-              title="Block a road ahead of Ambulance 1 and watch the police clear it"
-            >
-              {incidentBusy ? "Blocking a road…" : "⚠ Accident ahead of Ambulance 1"}
-            </button>
-          )}
-          <span className="field-label">Send one more ambulance now</span>
-          <ConditionSelect
-            conditions={conditions}
-            value={newCondition}
-            disabled={busy || full}
-            onChange={setNewCondition}
-          />
-          <div className="field-row">
-            <button
-              className="button button-secondary"
-              disabled={busy || full || !firstDriving}
-              onClick={() => onAddCrossing(newCondition)}
-              title="An ambulance that reaches the same signal as Ambulance 1 at the same time, from a side road"
-            >
-              {busy ? "Sending…" : "One that meets Ambulance 1 at a signal"}
-            </button>
-            {onAddPlanned && (
-              <button
-                className="button button-secondary"
-                disabled={busy || full}
-                onClick={() => onAddPlanned(newCondition)}
-                title="Send an ambulance on the trip planned above"
-              >
-                On the trip planned above
-              </button>
-            )}
-          </div>
-          {!firstDriving && (
-            <span className="field-hint">Works once Ambulance 1 is driving.</span>
-          )}
-          {full && (
-            <span className="muted">At most {maxAmbulances} ambulances at once.</span>
-          )}
-        </Collapsible>
-      )}
 
       {error && <p className="field-error">{error}</p>}
     </section>

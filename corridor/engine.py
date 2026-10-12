@@ -607,17 +607,19 @@ class CorridorEngine:
         """
         What to show for the ambulance's links `needed`: (phase number,
         None) when one phase of the normal program gives its whole path
-        through the signal a protected green ("G"), otherwise (None,
-        emergency colours): green for the ambulance's links and for links
-        green in every phase it needs, red for everything else.
+        a protected green ("G") and also turns green every other movement
+        from the ambulance's approach road(s); otherwise (None, emergency
+        colours): green for every movement from the ambulance's approach
+        road(s), red for everything else.
 
-        A movement that only ever gets a give-way green ("g", e.g. a turn
-        across oncoming traffic) is never served by a normal phase: the
-        oncoming traffic keeps its green and the ambulance has to wait
-        for a gap. It gets emergency colours instead, as real emergency
-        pre-emption does: green for every movement from the ambulance's
-        own approach road(s) - the cars queued in front of it may be
-        going elsewhere and must drive off - and red for all others.
+        The cars queued in front of the ambulance in its lane may be going
+        elsewhere (straight on while the ambulance turns): with only its
+        own turn green they wait at red and block it at a "green" signal.
+        Real emergency pre-emption therefore clears the whole approach.
+        This also covers a movement that only ever gets a give-way green
+        ("g", a turn across oncoming traffic): the oncoming traffic gets
+        red instead of the ambulance waiting for a gap.
+        (None, None): no phase ever gives the ambulance's links green.
         """
 
         phases = self.signals.phase_states(signal_id)
@@ -628,41 +630,31 @@ class CorridorEngine:
         def protected(state, index):
             return index < len(state) and state[index] == "G"
 
-        for number, state in enumerate(phases):
-            if all(protected(state, index) for index in needed):
-                return number, None
-
-        used = [state for state in phases if any(green(state, i) for i in needed)]
-        if not used:
+        if not any(any(green(state, i) for i in needed) for state in phases):
             return None, None
 
-        give_way_only = any(
-            not any(protected(state, index) for state in phases)
+        links = self.signals.controlled_links(signal_id)
+        approach = {
+            _road_of(link[0])
             for index in needed
-        )
+            for link in links[index] if link
+        }
+        approach_links = {
+            index for index, group in enumerate(links)
+            if any(link and _road_of(link[0]) in approach for link in group)
+        } | set(needed)
 
-        if give_way_only:
-            links = self.signals.controlled_links(signal_id)
-            approach = {
-                _road_of(link[0])
-                for index in needed
-                for link in links[index] if link
-            }
-            green_links = {
-                index for index, group in enumerate(links)
-                if any(link and _road_of(link[0]) in approach for link in group)
-            } | set(needed)
-            return None, "".join(
-                "G" if index in green_links else "r"
-                for index in range(len(used[0]))
-            )
+        for number, state in enumerate(phases):
+            if (
+                all(protected(state, index) for index in needed)
+                and all(green(state, index) for index in approach_links)
+            ):
+                return number, None
 
-        emergency = "".join(
-            "G" if index in needed
-            else (light if all(green(state, index) for state in used) else "r")
-            for index, light in enumerate(used[0])
+        return None, "".join(
+            "G" if index in approach_links else "r"
+            for index in range(len(phases[0]))
         )
-        return None, emergency
 
     def _start_switch(self, junction, why):
         """Start switching a junction for the ambulance. Returns False
@@ -711,10 +703,15 @@ class CorridorEngine:
         current = self.signals.light_states(signal_id)
         self.overridden_signals.add(signal_id)
 
-        # Already green for the ambulance's whole path: keep it green.
-        if all(
-            index < len(current) and current[index] in "Gg"
-            for index in needed
+        # Already green for the ambulance's whole path, and nothing green
+        # now turns red: keep it green (otherwise movements losing green
+        # get yellow first; the ambulance's own green stays on throughout).
+        def is_green(states, index):
+            return index < len(states) and states[index] in "Gg"
+
+        if all(is_green(current, index) for index in needed) and all(
+            is_green(target_state, index)
+            for index in range(len(current)) if is_green(current, index)
         ):
             self.held[key] = hold
             self._hold(hold)

@@ -35,7 +35,7 @@ from backend.services import admin_service, priority_log
 from backend.services.ambulance_run import AmbulanceRun
 from backend.services.police_notifier import police_notifier
 from simulation import live_traffic
-from simulation.sumo import route_planner
+from simulation.sumo import road_conditions, route_planner
 from simulation.sumo.adapters import (
     SumoAmbulanceTracker,
     SumoGiveWay,
@@ -961,6 +961,8 @@ class SimulationService:
         pickup = self.trip.get("pickup")
         via = (pickup["latitude"], pickup["longitude"]) if pickup else None
         car_minutes = live_traffic.car_travel_minutes(geometry[0], geometry[-1], via)
+        # Route planning avoids the roads TomTom shows slow or closed.
+        road_conditions.set_tomtom(snapshot, route_planner._net())
         return snapshot, car_minutes
 
     def _load_live_preview(self):
@@ -1035,6 +1037,7 @@ class SimulationService:
 
         finally:
             self.running = False
+            road_conditions.clear_vehicles()
             self._fail_pending_requests()
 
             # Ambulances still on the way when the simulation stopped.
@@ -1188,19 +1191,22 @@ class SimulationService:
                     first.response.police,
                 )
 
+            vehicles = traffic.vehicles(
+                exclude={run.vehicle_id for run in self.runs} | {
+                    unit["vehicle_id"] for unit in self.units.units.values()
+                    if unit["vehicle_id"]
+                }
+            )
+            # The cars on every road: new routes avoid queues and jams.
+            road_conditions.count_vehicles(
+                vehicles, now, (self.live_info or {}).get("level", "normal")
+            )
+
             self.latest_state = _state(
                 "running",
                 simulation_time=now,
                 ambulance=first.snapshot,
-                vehicles=_mark_pulled_over(
-                    traffic.vehicles(
-                        exclude={run.vehicle_id for run in self.runs} | {
-                            unit["vehicle_id"] for unit in self.units.units.values()
-                            if unit["vehicle_id"]
-                        }
-                    ),
-                    give_way,
-                ),
+                vehicles=_mark_pulled_over(vehicles, give_way),
                 signals=feed.signal_states(signals, first.upcoming),
                 corridor=feed.corridor_entries(
                     first.upcoming, signals,

@@ -76,7 +76,7 @@ function AdminSidebar() {
         </div>
       ))}
       <div className="admin-sidebar-group">
-        <a href="#/" className="admin-sidebar-back">← Live map</a>
+        <a href="#/control" className="admin-sidebar-back">← Control room</a>
       </div>
     </nav>
   );

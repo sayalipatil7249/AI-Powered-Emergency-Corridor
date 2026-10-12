@@ -1,10 +1,16 @@
 """
 Plans ambulance routes on the SUMO road network (no running simulation
 needed): snaps a start point and a hospital to the nearest roads, then
-finds the fastest route at Pune city speed limits. Waiting at signals is
+finds the route with the fewest vehicles in the way and the least chance
+of getting stuck, from live traffic (simulation/sumo/road_conditions.py:
+the cars on each road in the running simulation, else TomTom's live
+speeds, plus where ambulances got stuck before). With no live data it is
+the fastest route at Pune city speed limits. Waiting at signals is
 ignored on purpose: the corridor turns them green for the ambulance.
 """
 
+import heapq
+import itertools
 import json
 import math
 import os
@@ -14,6 +20,7 @@ from functools import lru_cache
 
 import sumolib
 
+from simulation.sumo import road_conditions
 from simulation.sumo.sumo_bridge import (
     AMBULANCE_MAX_SPEED,
     CITY_SPEED_LIMIT,
@@ -406,12 +413,157 @@ def _street_names(edges, limit=4):
     return names[:limit]
 
 
-def _best_path(starts, ends, fastest):
+def _best_path(starts, ends, fastest, live=True):
     """The best path between the nearest roads; the extra roads
-    _nearby_roads offers around a pocket only when there is none."""
-    best = _search_paths(starts[:NEARBY_ROADS], ends[:NEARBY_ROADS], fastest)
+    _nearby_roads offers around a pocket only when there is none.
+    fastest (and live data available, unless live=False): the path with
+    the lowest live cost (_live_search); its cost is then that, in s."""
+    if fastest and live and road_conditions.basis() != "speed limits":
+        def search(starts, ends):
+            return _live_search(starts, ends)
+    else:
+        def search(starts, ends):
+            return _search_paths(starts, ends, fastest)
+
+    best = search(starts[:NEARBY_ROADS], ends[:NEARBY_ROADS])
     if best is None and (len(starts) > NEARBY_ROADS or len(ends) > NEARBY_ROADS):
-        best = _search_paths(starts, ends, fastest)
+        best = search(starts, ends)
+    return best
+
+
+# A road on the speed-limit route counts as "avoided" when it has at
+# least this many cars standing still (or is a stuck risk, moving at
+# under AVOIDED_SLOW_SHARE of its limit, or an earlier stuck spot).
+AVOIDED_STOPPED_CARS = 3
+# Live speed below this share of the limit counts as slow.
+AVOIDED_SLOW_SHARE = 0.5
+
+
+def _routing_note(starts, ends, edges, live_seconds):
+    """Why this route: {"basis", "live_minutes", "avoids": [plain
+    reasons, worst first]} - "avoids" lists the busy roads on the route
+    the speed limits alone would have picked."""
+    basis = road_conditions.basis()
+    note = {"basis": basis, "live_minutes": None, "avoids": []}
+    if basis == "speed limits":
+        return note
+    note["live_minutes"] = round(live_seconds / 60, 1)
+
+    plain = _best_path(starts, ends, fastest=True, live=False)
+    if plain is None:
+        return note
+    chosen = {edge.getID() for edge in edges}
+    _, why = road_conditions.cost_function(_net())
+    reasons = {}
+    for edge in plain[0]:
+        if edge.getID() in chosen:
+            continue
+        name = edge.getName() or "a side road"
+        info = why(edge)
+        if info["stuck"]:
+            text, weight = f"{info['stopped']} cars stopped, likely to get stuck", 3 + info["stopped"]
+        elif info["stopped"] >= AVOIDED_STOPPED_CARS:
+            text, weight = f"{info['stopped']} cars stopped", info["stopped"]
+        elif info["slow_share"] is not None and info["slow_share"] < AVOIDED_SLOW_SHARE:
+            text, weight = f"traffic crawling at {round(info['slow_share'] * 100)}% of normal speed", 2
+        elif info["history"]:
+            text, weight = "ambulances got stuck here before", 1
+        else:
+            continue
+        if name not in reasons or weight > reasons[name][1]:
+            reasons[name] = (text, weight)
+    note["avoids"] = [
+        f"{name}: {text}"
+        for name, (text, _) in sorted(reasons.items(), key=lambda item: -item[1][1])
+    ][:3]
+    return note
+
+
+# Through a junction between two roads (s): the live search adds it for
+# every road it enters (the speed-limit search counts the junction lanes).
+JUNCTION_SECONDS = 2.0
+
+
+def _live_search(starts, ends):
+    """The path with the shortest travel time in live traffic
+    (road_conditions.cost_function: each road timed for when the
+    ambulance reaches it - the AI forecast when there is one, else the
+    traffic now), from any start road to any end road. Same result as
+    _search_paths, or None."""
+
+    cost, _ = road_conditions.cost_function(_net())
+
+    def part(edge, share):
+        return cost(edge) * min(1.0, max(0.0, share))
+
+    starts_by_id = {}
+    for edge, position, distance in starts:
+        starts_by_id.setdefault(edge.getID(), (edge, position, distance))
+    ends_by_id = {}
+    for edge, position, distance in ends:
+        ends_by_id.setdefault(edge.getID(), (edge, position, distance))
+
+    best = None
+    # Start and end on the same road, in driving order.
+    for road, (edge, start_position, start_distance) in starts_by_id.items():
+        if road in ends_by_id and ends_by_id[road][1] >= start_position:
+            _, end_position, end_distance = ends_by_id[road]
+            seconds = part(edge, (end_position - start_position) / max(edge.getLength(), 1.0))
+            if math.isfinite(seconds):
+                best = ([edge], seconds, start_position, end_position,
+                        start_distance, end_distance)
+
+    order = itertools.count()
+    heap, settled, distance_to, previous, edges = [], set(), {}, {}, {}
+    entered_cost = {}  # road -> its full time, as timed when entered
+    for road, (edge, position, _) in starts_by_id.items():
+        seconds = part(edge, 1 - position / max(edge.getLength(), 1.0))
+        if math.isfinite(seconds) and seconds < distance_to.get(road, math.inf):
+            distance_to[road], previous[road], edges[road] = seconds, None, edge
+            heapq.heappush(heap, (seconds, next(order), road))
+
+    while heap:
+        total, _, road = heapq.heappop(heap)
+        if road in settled:
+            continue
+        if best is not None and total > best[1] + JUNCTION_SECONDS:
+            break
+        settled.add(road)
+        edge = edges[road]
+
+        if road in ends_by_id and previous[road] is not None:
+            _, end_position, end_distance = ends_by_id[road]
+            seconds = total - entered_cost[road] * min(
+                1.0, max(0.0, 1 - end_position / max(edge.getLength(), 1.0))
+            )
+            if best is None or seconds < best[1]:
+                path, step = [], road
+                while step is not None:
+                    path.append(edges[step])
+                    step = previous[step]
+                path.reverse()
+                _, start_position, start_distance = starts_by_id[path[0].getID()]
+                best = (path, seconds, start_position, end_position,
+                        start_distance, end_distance)
+
+        for following in edge.getAllowedOutgoing(VEHICLE_CLASS):
+            if following.getFunction() == "internal":
+                continue
+            following_id = following.getID()
+            if following_id in settled:
+                continue
+            # Timed for when the ambulance gets there (AI forecast).
+            seconds = cost(following, total + JUNCTION_SECONDS)
+            if not math.isfinite(seconds):
+                continue
+            candidate = total + JUNCTION_SECONDS + seconds
+            if candidate < distance_to.get(following_id, math.inf):
+                distance_to[following_id] = candidate
+                entered_cost[following_id] = seconds
+                previous[following_id] = road
+                edges[following_id] = following
+                heapq.heappush(heap, (candidate, next(order), following_id))
+
     return best
 
 
@@ -469,8 +621,9 @@ def plan_route(start_latitude, start_longitude, end_latitude, end_longitude,
 
 
 def _plan_between(starts, ends, hospital_name):
-    """plan_route's result for the fastest route from one of starts to
-    one of ends ([(edge, position, distance)])."""
+    """plan_route's result for the best route (fewest vehicles in the
+    way, least stuck risk; see _best_path) from one of starts to one of
+    ends ([(edge, position, distance)])."""
 
     fastest = _best_path(starts, ends, fastest=True)
     if fastest is None:
@@ -495,6 +648,7 @@ def _plan_between(starts, ends, hospital_name):
         "start_snap_meters": round(start_distance),
         "hospital_snap_meters": round(end_distance),
         "shorter_alternative": None,
+        "routing": _routing_note(starts, ends, edges, fastest[1]),
     }
 
     # AI estimate of the real trip time per traffic level (ai/pretrip.py);
@@ -1331,10 +1485,7 @@ def plan_journey(pickup_latitude, pickup_longitude, hospital_latitude,
                 and to_patient["arrival_position"] <= to_patient["depart_position"] + 5):
             continue
         carry_minutes = pickup[2] / STRETCHER_SPEED / 60
-        total = (
-            to_patient["minutes_without_traffic"] + to_hospital["minutes_without_traffic"]
-            + carry_minutes
-        )
+        total = _leg_minutes(to_patient) + _leg_minutes(to_hospital) + carry_minutes
         if best is None or total < best[0]:
             best = (total, to_patient, to_hospital)
     if best is None:
@@ -1392,4 +1543,20 @@ def plan_journey(pickup_latitude, pickup_longitude, hospital_latitude,
         "minutes_to_patient": to_patient["minutes_without_traffic"],
         "minutes_to_hospital": to_hospital["minutes_without_traffic"],
         "shorter_alternative": None,
+        "routing": {
+            "basis": to_hospital["routing"]["basis"],
+            "live_minutes": (
+                round(_leg_minutes(to_patient) + _leg_minutes(to_hospital), 1)
+                if to_hospital["routing"]["live_minutes"] is not None else None
+            ),
+            "avoids": list(dict.fromkeys(
+                to_patient["routing"]["avoids"] + to_hospital["routing"]["avoids"]
+            ))[:3],
+        },
     }
+
+
+def _leg_minutes(leg):
+    """A planned leg's minutes in live traffic, else at the speed limits."""
+    live = leg["routing"]["live_minutes"]
+    return live if live is not None else leg["minutes_without_traffic"]

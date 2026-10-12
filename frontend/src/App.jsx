@@ -4,12 +4,14 @@ import MapView from "./MapView";
 import AskChat from "./components/AskChat";
 import ReportProblem from "./components/ReportProblem";
 import EmergencyIntake from "./components/EmergencyIntake";
+import EtaCard from "./components/EtaCard";
 import BookingList from "./components/BookingList";
-import DashboardHeader from "./components/DashboardHeader";
+import CrewView from "./components/CrewView";
+import NewHeader from "./components/NewHeader";
 import LiveStatusPanel from "./components/LiveStatusPanel";
 import FleetPanel from "./components/FleetPanel";
 import StoryBar from "./components/StoryBar";
-import TripPanel from "./components/TripPanel";
+import TestToolsPanel from "./components/TestToolsPanel";
 import TripPlanner from "./components/TripPlanner";
 import {
   DEMO_HOSPITAL_NAME,
@@ -18,7 +20,6 @@ import {
 } from "./routeStatus";
 import { DEFAULT_CONDITION, DEFAULT_CONDITIONS } from "./fleet";
 import { API_URL, RECONNECT_DELAY_MS, useLiveState } from "./api";
-
 
 // Fixed data (area, hospitals, police, conditions) is loaded once, but
 // the page is often opened before the backend has finished starting:
@@ -48,22 +49,43 @@ function loadWhenReady(path, onData) {
   };
 }
 
+// Ready-made demo trips for showing clients (Test tools), each tested.
+// "demo" keeps the planner from swapping the hospital for the nearest.
+const DECCAN = { name: "Deccan Gymkhana, Pune", latitude: 18.5158926, longitude: 73.84116, demo: true };
+const DEMOS = [
+  {
+    id: "heart",
+    label: "Heart attack",
+    note: "Advanced ambulance, green signals ahead, police sent ahead, cath lab ready",
+    start: DECCAN,
+    hospital: "Jehangir Hospital",
+    condition: "heart_attack",
+  },
+  {
+    id: "accident",
+    label: "Road accident",
+    note: "Quick trip to a government hospital with an accident team",
+    start: { name: "Pune Railway Station, Somwar Peth", latitude: 18.5278301, longitude: 73.8687772, demo: true },
+    hospital: "B.J.Medical College and Sassoon Hospital",
+    condition: "major_trauma",
+  },
+  {
+    id: "meeting",
+    label: "Two ambulances",
+    note: "Both reach one signal: the critical patient gets the green first",
+    start: DECCAN,
+    hospital: "Jehangir Hospital",
+    condition: "heart_attack",
+    crossing: "fracture",
+  },
+];
 
-// "X, Pune" unless the name already says Pune.
-function withCity(name) {
-  return /pune/i.test(name || "") ? name : `${name}, Pune`;
-}
-
-// The tested demo trip's start (see backend demo_trip()). "demo" keeps
-// the planner from swapping its hospital for the nearest one.
-const DEMO_START = {
-  name: "Shukrawar Peth",
-  latitude: 18.5160848,
-  longitude: 73.8538128,
-  demo: true,
-};
-
-function App() {
+// The live app for one role. tab: "control" for the 108 control room,
+// "crew" for the tablet in one ambulance (unit: its 108 unit id, or the
+// ambulance's number for one without a 108 unit, e.g. "1" on a demo
+// trip). Both show the same live simulation.
+function App({ tab = "control", unit = null }) {
+  const crewTab = tab === "crew";
   const { state: simulationState, connected } = useLiveState();
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -89,6 +111,9 @@ function App() {
   // The whole journey: the ambulance leaves the nearest base, picks the
   // patient up at "From", then drives to "To".
   const [fromBase, setFromBase] = useState(true);
+  // Fields the AI filled in from the call ({start, condition, hospital}):
+  // tagged until the control room changes them.
+  const [aiFilled, setAiFilled] = useState(null);
 
   // Patients' conditions (priority): the first ambulance's is set by
   // each crew before requesting a corridor and during its trip.
@@ -196,7 +221,6 @@ function App() {
     simulationStatus
   );
 
-
   // The simulated part of Pune: trips must start and end inside it.
   useEffect(() => loadWhenReady("/plan/area", setArea), []);
 
@@ -220,6 +244,7 @@ function App() {
 
   // A new start or hospital makes the old plan out of date.
   const changeStart = (place) => {
+    setAiFilled((fields) => fields && { ...fields, start: false });
     setTripStart(place);
     setPlan(null);
     setPlanStarted(false);
@@ -228,26 +253,45 @@ function App() {
   };
 
   const changeHospital = (hospital) => {
+    setAiFilled((fields) => fields && { ...fields, hospital: false });
     setTripHospital(hospital);
     setPlan(null);
     setPlanStarted(false);
     setPlanError("");
   };
 
-  // "Demo route": fill in the tested demo trip (Shukrawar Peth -> Ruby
-  // Hall Clinic, the ambulance already with the patient) and plan it at
-  // once, so it shows on the map and Start runs it.
-  const useDemoRoute = () => {
-    const hospital =
-      hospitals.find((item) => item.name === DEMO_HOSPITAL_NAME) || null;
-    setTripStart(DEMO_START);
+  // A demo trip (DEMOS): fill in the planner and plan it at once, so it
+  // shows on the map and Start runs it. "Two ambulances" books the trip
+  // as Ambulance 1 plus one that meets it at a signal.
+  const loadDemo = (demo) => {
+    const hospital = hospitals.find((item) => item.name === demo.hospital) || null;
+    if (!hospital) return;
+    setAiFilled(null);
+    setTripStart(demo.start);
     setTripHospital(hospital);
-    setFromBase(false);
+    setStartCondition(demo.condition);
+    setFromBase(true);
     setPlanStarted(false);
     setPickMode(false);
-    if (hospital) {
-      findRoute({ start: DEMO_START, hospital, fromBase: false });
+    setPreviewFocus(false);
+    if (demo.crossing) {
+      setPlan(null);
+      setBookings(() => [
+        {
+          kind: "trip", start: demo.start, hospital, from_base: true,
+          condition: demo.condition, label: `${demo.start.name} → ${hospital.name}`,
+          id: `${Date.now()}-0`,
+        },
+        {
+          kind: "crossing", condition: demo.crossing,
+          label: "From a side road, crossing Ambulance 1's route at a signal",
+          id: `${Date.now()}-1`,
+        },
+      ]);
+      return;
     }
+    setBookings([]);
+    findRoute({ start: demo.start, hospital, fromBase: true, condition: demo.condition });
   };
 
   const tripBody = (condition) =>
@@ -262,6 +306,7 @@ function App() {
     setTripStart(start);
     setTripHospital(hospital);
     setStartCondition(result.condition);
+    setAiFilled({ start: true, condition: true, hospital: true });
     setFromBase(result.from_base);
     setPlanStarted(false);
     setPickMode(false);
@@ -345,7 +390,6 @@ function App() {
       setStarting(false);
     }
   };
-
 
   // Separate requests, dispatched together for this simulation.
   const startBookedFleet = async () => {
@@ -501,9 +545,6 @@ function App() {
     }
   };
 
-
-
-
   const ambulance = simulationState?.ambulance;
   const ambulances = simulationState?.ambulances || [];
   // Every patient is at a hospital: only handovers and drives back to the
@@ -512,9 +553,13 @@ function App() {
   const tripsDone =
     running && ambulances.length > 0 && ambulances.every((item) => item.status === "arrived");
   const locked = running && !tripsDone;
-  const selectedRun = ambulances.find((item) => item.vehicle_id === selectedAmbulanceId)
+  // The crew page shows its own ambulance only (none until it is sent).
+  const crewRun = crewTab
+    ? ambulances.find((item) => (/^\d+$/.test(unit) ? item.number === Number(unit) : item.unit?.id === unit))
+    : null;
+  const selectedRun = crewTab ? crewRun : ambulances.find((item) => item.vehicle_id === selectedAmbulanceId)
     || ambulances[0];
-  const selectedId = selectedRun?.vehicle_id || selectedAmbulanceId;
+  const selectedId = crewTab ? crewRun?.vehicle_id : selectedRun?.vehicle_id || selectedAmbulanceId;
   const selectedDetails = simulationState?.ambulance_details?.[selectedId];
   const selectedSnapshot = selectedRun?.number === 1
     ? ambulance
@@ -535,12 +580,13 @@ function App() {
   });
 
   // A new plan (not yet started) replaces the last trip on screen.
-  const showPlan = !locked && plan && !planStarted;
+  // The crew always sees the live run, never the control room's plan.
+  const showPlan = !crewTab && !locked && plan && !planStarted;
 
   // Names come from the running / last trip, otherwise from the planner.
   const liveTrip =
     !showPlan && (running || ambulance)
-      ? selectedRun || simulationState?.trip : null;
+      ? (crewTab ? crewRun : selectedRun || simulationState?.trip) : null;
   // Start runs the chosen trip (start and hospital picked, with or
   // without Find route); with nothing chosen, the demo trip.
   const tripChosen = Boolean(plan || (tripStart && tripHospital));
@@ -548,8 +594,6 @@ function App() {
     liveTrip?.hospital_name || (tripChosen && tripHospital?.name) || DEMO_HOSPITAL_NAME;
   // A start or hospital picked, but no route found yet.
   const planPending = !liveTrip && !plan && Boolean(tripStart);
-  const startName =
-    liveTrip?.start_name || (tripChosen && tripStart?.name) || "Shukrawar Peth";
 
   const liveRoute = simulationState?.route || [];
   // Where the trip starts and ends, shown before and during the run.
@@ -571,7 +615,7 @@ function App() {
         hospital:
           tripHospital && [tripHospital.latitude, tripHospital.longitude],
       };
-  const showFleetPreview = !locked && !planStarted && bookings.length > 0;
+  const showFleetPreview = !crewTab && !locked && !planStarted && bookings.length > 0;
   const previewRoutes = showFleetPreview && previewReady ? fleetPreview.ambulances : [];
   const previewNumber = Number(selectedAmbulanceId.slice(-2)) || 1;
   const selectedPreview = previewRoutes.find((item) => item.number === previewNumber);
@@ -606,200 +650,246 @@ function App() {
     : selectedRun?.number === 1 ? simulationState?.response
       : selectedDetails?.response;
 
+  const mapElement = (
+    <MapView
+      units={simulationState?.units || []}
+      expanded={mapExpanded}
+      onExpandChange={setMapExpanded}
+      ambulance={showFleetPreview ? null : shownAmbulance}
+      selectedNumber={showFleetPreview ? previewNumber : selectedRun?.number || previewNumber}
+      selectedAmbulanceId={selectedId}
+      view={mapView}
+      onViewChange={setMapView}
+      camera={
+        cameraMode !== "auto" ? cameraMode
+          // The crew follows its own ambulance.
+          : !crewTab && ambulances.filter((item) => item.status === "driving").length > 1 ? "all" : "follow"
+      }
+      onCameraChange={setCameraMode}
+      onSelectAmbulance={focusAmbulance}
+      vehicles={vehicles}
+      route={showFleetPreview ? [] : previewPlan ? previewPlan.geometry : selectedRun?.route || (crewTab ? [] : liveRoute)}
+      previewRoutes={previewRoutes}
+      previewFocus={previewFocus}
+      sharedJunctions={showFleetPreview && previewReady ? fleetPreview.shared_junctions : []}
+      routeStatuses={showFleetPreview ? [] : shownStatuses}
+      routeTraffic={showPlan || showFleetPreview ? [] : selectedRun?.number === 1
+        ? simulationState?.route_traffic || [] : selectedDetails?.route_traffic || []}
+      policeStations={policeStations}
+      routePolice={showFleetPreview ? [] :
+        (previewPlan
+          ? previewPlan.police_along_route
+          : selectedRun?.number === 1 ? simulationState?.trip?.police_along_route
+            : selectedDetails?.police_along_route) || []
+      }
+      stretches={showFleetPreview ? [] :
+        (previewPlan
+          ? previewPlan.signalless_stretches
+          : (selectedRun?.number === 1 ? simulationState?.police_watch
+            : selectedDetails?.police_watch)?.stretches) || []
+      }
+      policeWatch={shownPoliceWatch}
+      policeBoard={showPlan ? null : simulationState?.police_board}
+      incidents={showPlan || showFleetPreview ? [] : simulationState?.incidents || []}
+      response={shownResponse}
+      startPoint={showFleetPreview ? null : tripPoints.start}
+      pickupPoint={showFleetPreview ? null : tripPoints.pickup}
+      hospitalPoint={showFleetPreview ? null : tripPoints.hospital}
+      previewSignals={!showFleetPreview && previewPlan ? previewPlan.signals : []}
+      hospitalName={selectedPreview?.hospital_name || hospitalName}
+      area={area}
+      liveTraffic={simulationState?.live_traffic}
+      hospitals={hospitals}
+      onSetStart={locked || crewTab ? null : changeStart}
+      onSetDestination={locked || crewTab ? null : changeHospital}
+      pickMode={pickMode}
+      onPick={(point) =>
+        changeStart({
+          name: "Point on the map",
+          ...point,
+        })
+      }
+      overlay={crewTab ? null : <StoryBar story={story} notice={notice} />}
+      otherAmbulances={showPlan || showFleetPreview || crewTab ? [] : ambulances.filter(
+        (item) => item.vehicle_id !== selectedId
+      )}
+    />
+  );
+
+  const plannerElement = (
+    <>
+    <EmergencyIntake apiUrl={API_URL} disabled={starting || locked} onFill={fillFromAi} />
+    <TripPlanner
+      key={tripStart?.name || "no-start"}
+      apiUrl={API_URL}
+      hospitals={hospitals}
+      start={tripStart}
+      onStartChange={changeStart}
+      hospital={tripHospital}
+      onHospitalChange={changeHospital}
+      pickMode={pickMode}
+      onPickModeChange={setPickMode}
+      plan={plan}
+      planning={planning}
+      planError={planError}
+      onFindRoute={findRoute}
+      liveLevel={simulationState?.live_traffic?.level || "normal"}
+      disabled={starting}
+      conditions={conditions}
+      condition={startCondition}
+      onConditionChange={(value) => {
+        setAiFilled((fields) => fields && { ...fields, condition: false });
+        setStartCondition(value);
+        // The 108 ambulance depends on the condition (ALS / BLS).
+        if (fromBase) setPlan(null);
+      }}
+      booked={bookings.map((item) => item.hospital?.name).filter(Boolean)}
+      fromBase={fromBase}
+      aiFilled={aiFilled}
+      onFromBaseChange={(value) => {
+        setFromBase(value);
+        setPlan(null);
+      }}
+    />
+    </>
+  );
+
+  const bookingElement = !locked && (
+    <BookingList
+      bookings={bookings}
+      preview={previewReady ? fleetPreview : null}
+      previewError={previewError}
+      onRetryPreview={() => setPreviewAttempt((attempt) => attempt + 1)}
+      previewBusy={bookings.length > 0 && !previewReady && !previewError}
+      disabled={starting}
+      onConditionChange={(id, condition) => {
+        setPlanStarted(false);
+        setBookings((list) => list.map((item) => item.id === id ? { ...item, condition } : item));
+      }}
+      conditions={conditions}
+      maxAmbulances={simulationState?.max_ambulances}
+      canBookTrip={Boolean(tripHospital)}
+      tripLabel={tripStart ? "this trip" : "the demo route"}
+      onBookTrip={bookTrip}
+      onRemove={removeBooking}
+      onViewRoute={(index) => focusAmbulance(`ambulance_${String(index + 1).padStart(2, "0")}`)}
+    />
+  );
+
+  const fleetPanelElement = (
+    <FleetPanel
+      ambulances={showPlan || showFleetPreview ? [] : ambulances}
+      selectedAmbulanceId={selectedId}
+      onViewRoute={(vehicleId) => focusAmbulance(vehicleId)}
+      onChase={(vehicleId) => focusAmbulance(vehicleId, "chase")}
+      referee={simulationState?.referee}
+      conditions={conditions}
+      running={running}
+      onConditionChange={changeCondition}
+      onReportProblem={(requestId) => setReportFor(requestId)}
+      onCallPolice={callPolice}
+      crewHref={(item) => `#/crew/${encodeURIComponent(item.unit?.id || item.number)}`}
+      busy={fleetBusy}
+      error={fleetError}
+    />
+  );
+
+  const liveElement = (
+    <LiveStatusPanel
+      ambulance={shownAmbulance}
+      liveTraffic={simulationState?.live_traffic}
+      response={shownResponse}
+      policeWatch={shownPoliceWatch}
+      policeBoard={showPlan ? null : simulationState?.police_board}
+      policeStations={policeStations}
+      giveWay={showPlan ? null : simulationState?.give_way}
+      agentFeed={simulationState?.agent_feed || []}
+    />
+  );
+
+  const reportElement = reportFor !== null && (
+    <ReportProblem
+      apiUrl={API_URL}
+      ambulances={ambulances}
+      requestId={reportFor}
+      onClose={() => setReportFor(null)}
+    />
+  );
+
   return (
-    <div className="app">
-      <DashboardHeader
+    <div className="app nl-app">
+      <NewHeader
+        tab={crewTab ? "crew" : "control"}
+        subtitle={crewTab
+          ? `Ambulance crew · ${/^\d+$/.test(unit) ? `Ambulance ${unit}` : unit}`
+          : "108 control room"}
         connected={connected}
-        onStartSimulation={startSimulation}
-        onStopSimulation={stopSimulation}
-        starting={starting}
-        startDisabled={locked || (bookings.length > 0 && !previewReady)}
-        stopping={stopping}
         running={running}
-        tripLabel={selectedPreview
-          ? `${selectedPreview.label}: ${selectedPreview.start_name} to ${withCity(selectedPreview.hospital_name)}`
-          : `${selectedRun?.label || "Ambulance"} from ${startName} to ${withCity(hospitalName)}`}
+        starting={starting}
+        stopping={stopping}
+        startDisabled={locked || (bookings.length > 0 && !previewReady)}
+        onStart={startSimulation}
+        onStop={stopSimulation}
         onReportProblem={() => setReportFor("")}
-        playbackSpeed={simulationState?.playback_speed}
-        onPlaybackSpeedChange={changePlaybackSpeed}
       />
 
-      <main className={`content ${mapExpanded ? "map-expanded" : ""}`}>
-        <MapView
-          units={simulationState?.units || []}
-          expanded={mapExpanded}
-          onExpandChange={setMapExpanded}
-          ambulance={showFleetPreview ? null : shownAmbulance}
-          selectedNumber={showFleetPreview ? previewNumber : selectedRun?.number || previewNumber}
-          selectedAmbulanceId={selectedId}
-          view={mapView}
-          onViewChange={setMapView}
-          camera={
-            cameraMode !== "auto" ? cameraMode
-              : ambulances.filter((item) => item.status === "driving").length > 1 ? "all" : "follow"
-          }
-          onCameraChange={setCameraMode}
-          onSelectAmbulance={focusAmbulance}
-          vehicles={vehicles}
-          route={showFleetPreview ? [] : previewPlan ? previewPlan.geometry : selectedRun?.route || liveRoute}
-          previewRoutes={previewRoutes}
-          previewFocus={previewFocus}
-          sharedJunctions={showFleetPreview && previewReady ? fleetPreview.shared_junctions : []}
-          routeStatuses={showFleetPreview ? [] : shownStatuses}
-          routeTraffic={showPlan || showFleetPreview ? [] : selectedRun?.number === 1
-            ? simulationState?.route_traffic || [] : selectedDetails?.route_traffic || []}
-          policeStations={policeStations}
-          routePolice={showFleetPreview ? [] :
-            (previewPlan
-              ? previewPlan.police_along_route
-              : selectedRun?.number === 1 ? simulationState?.trip?.police_along_route
-                : selectedDetails?.police_along_route) || []
-          }
-          stretches={showFleetPreview ? [] :
-            (previewPlan
-              ? previewPlan.signalless_stretches
-              : (selectedRun?.number === 1 ? simulationState?.police_watch
-                : selectedDetails?.police_watch)?.stretches) || []
-          }
-          policeWatch={shownPoliceWatch}
-          policeBoard={showPlan ? null : simulationState?.police_board}
-          incidents={showPlan || showFleetPreview ? [] : simulationState?.incidents || []}
-          response={shownResponse}
-          startPoint={showFleetPreview ? null : tripPoints.start}
-          pickupPoint={showFleetPreview ? null : tripPoints.pickup}
-          hospitalPoint={showFleetPreview ? null : tripPoints.hospital}
-          previewSignals={!showFleetPreview && previewPlan ? previewPlan.signals : []}
-          hospitalName={selectedPreview?.hospital_name || hospitalName}
-          area={area}
-          liveTraffic={simulationState?.live_traffic}
-          hospitals={hospitals}
-          onSetStart={locked ? null : changeStart}
-          onSetDestination={locked ? null : changeHospital}
-          pickMode={pickMode}
-          onPick={(point) =>
-            changeStart({
-              name: "Point on the map",
-              ...point,
-            })
-          }
-          overlay={<StoryBar story={story} notice={notice} />}
-          otherAmbulances={showPlan || showFleetPreview ? [] : ambulances.filter(
-            (item) => item.vehicle_id !== selectedId
-          )}
+      {crewTab ? (
+        <CrewView
+          run={crewRun}
+          routeStatuses={routeStatuses}
+          running={running}
+          onCallPolice={callPolice}
+          onReportProblem={(requestId) => setReportFor(requestId)}
+          busy={fleetBusy}
+          message={fleetError || notice}
+          map={mapElement}
+          eta={<EtaCard ambulance={selectedSnapshot} ambulanceLabel={selectedRun?.label} />}
         />
-
-        <TripPanel
-          ambulance={shownAmbulance}
-          ambulanceLabel={selectedRun?.label}
-          routeStatuses={shownStatuses}
-          hospitalName={selectedPreview?.hospital_name || hospitalName}
-          live={
-            <LiveStatusPanel
-              ambulance={shownAmbulance}
-              liveTraffic={simulationState?.live_traffic}
-              response={shownResponse}
-              policeWatch={shownPoliceWatch}
-              policeBoard={showPlan ? null : simulationState?.police_board}
-              policeStations={policeStations}
-              giveWay={showPlan ? null : simulationState?.give_way}
-              agentFeed={simulationState?.agent_feed || []}
-            />
-          }
-          planner={
-            <>
-            <EmergencyIntake apiUrl={API_URL} disabled={starting || locked} onFill={fillFromAi} />
-            <TripPlanner
-              key={tripStart?.name || "no-start"}
-              apiUrl={API_URL}
-              hospitals={hospitals}
-              start={tripStart}
-              onStartChange={changeStart}
-              hospital={tripHospital}
-              onHospitalChange={changeHospital}
-              pickMode={pickMode}
-              onPickModeChange={setPickMode}
-              plan={plan}
-              planning={planning}
-              planError={planError}
-              onFindRoute={findRoute}
-              onUseDemo={useDemoRoute}
-              liveLevel={simulationState?.live_traffic?.level || "normal"}
-              disabled={starting}
-              conditions={conditions}
-              condition={startCondition}
-              onConditionChange={(value) => {
-                setStartCondition(value);
-                // The 108 ambulance depends on the condition (ALS / BLS).
-                if (fromBase) setPlan(null);
-              }}
-              booked={bookings.map((item) => item.hospital?.name).filter(Boolean)}
-              fromBase={fromBase}
-              onFromBaseChange={(value) => {
-                setFromBase(value);
-                setPlan(null);
-              }}
-            />
-            </>
-          }
-          fleet={
-            <>
-            {!locked && (
-              <BookingList
-                bookings={bookings}
-                preview={previewReady ? fleetPreview : null}
-                previewError={previewError}
-                onRetryPreview={() => setPreviewAttempt((attempt) => attempt + 1)}
-                previewBusy={bookings.length > 0 && !previewReady && !previewError}
-                disabled={starting}
-                onConditionChange={(id, condition) => {
-                  setPlanStarted(false);
-                  setBookings((list) => list.map((item) => item.id === id ? { ...item, condition } : item));
-                }}
-                conditions={conditions}
-                maxAmbulances={simulationState?.max_ambulances}
-                canBookTrip={Boolean(tripHospital)}
-                tripLabel={tripStart ? "this trip" : "the demo route"}
-                onBookTrip={bookTrip}
-                onBookCrossing={bookCrossing}
-                onRemove={removeBooking}
-                onViewRoute={(index) => focusAmbulance(`ambulance_${String(index + 1).padStart(2, "0")}`)}
-              />
-            )}
-            <FleetPanel
-              ambulances={showPlan || showFleetPreview ? [] : ambulances}
-              selectedAmbulanceId={selectedId}
-              onViewRoute={(vehicleId) => focusAmbulance(vehicleId)}
-              onChase={(vehicleId) => focusAmbulance(vehicleId, "chase")}
-              referee={simulationState?.referee}
-              conditions={conditions}
+      ) : (
+        <main className={`nl-control ${mapExpanded ? "map-expanded" : ""}`}>
+          <aside className="panel nl-left">
+            {plannerElement}
+            <EtaCard ambulance={shownAmbulance} ambulanceLabel={selectedRun?.label} />
+          </aside>
+          {mapElement}
+          <aside className="panel nl-right">
+            {bookingElement}
+            <TestToolsPanel
               running={running}
-              maxAmbulances={simulationState?.max_ambulances}
-              onConditionChange={changeCondition}
-              onHospitalDeclines={hospitalDeclines}
-              onReportProblem={(requestId) => setReportFor(requestId)}
-              onCallPolice={callPolice}
-              onAddCrossing={addCrossingAmbulance}
-              onAddPlanned={plan && tripStart ? addPlannedAmbulance : null}
-              onSimulateIncident={simulateIncident}
-              incidentBusy={incidentBusy}
+              locked={locked}
+              conditions={conditions}
+              bookings={bookings.length}
+              firstDriving={ambulances[0]?.status === "driving"}
+              selectedLabel={selectedRun?.label}
+              selectedDriving={running && selectedRun?.status === "driving"}
+              canAddPlanned={Boolean(plan && tripStart)}
+              full={ambulances.length + bookings.length >= (simulationState?.max_ambulances || 10)}
               busy={fleetBusy}
-              error={fleetError}
+              incidentBusy={incidentBusy}
+              playbackSpeed={simulationState?.playback_speed}
+              demos={DEMOS}
+              onUseDemo={loadDemo}
+              onBookCrossing={bookCrossing}
+              onAddCrossing={addCrossingAmbulance}
+              onAddPlanned={addPlannedAmbulance}
+              onSimulateIncident={simulateIncident}
+              onHospitalDeclines={() => hospitalDeclines(selectedId)}
+              onPlaybackSpeedChange={changePlaybackSpeed}
             />
-            </>
-          }
-        />
-      </main>
+            {fleetPanelElement}
+            <section className="panel-section">
+              <div className="section-heading">
+                <h2>Updates</h2>
+                <span className="muted">Traffic, police, messages</span>
+              </div>
+              {liveElement}
+            </section>
+          </aside>
+        </main>
+      )}
 
       <AskChat apiUrl={API_URL} />
-
-      {reportFor !== null && (
-        <ReportProblem
-          apiUrl={API_URL}
-          ambulances={ambulances}
-          requestId={reportFor}
-          onClose={() => setReportFor(null)}
-        />
-      )}
+      {reportElement}
     </div>
   );
 }

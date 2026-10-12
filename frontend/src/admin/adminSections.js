@@ -9,7 +9,7 @@ export const GROUPS = [
     page: "#/admin",
     items: [
       { section: "dashboard", label: "Dashboard", about: "Every ambulance right now, how fast they reach hospital, where the time goes, and what slows them down." },
-      { section: "complaints", label: "Complaints", badge: true, about: "Problems reported by crews, or filed automatically. Set the status and add a note when solved." },
+      { section: "complaints", label: "Complaints", badge: true, about: "Problems reported by crews, or filed automatically. Mark each one solved when it has been dealt with." },
       { section: "trips", label: "Trips", about: "Every trip, newest first (click one for its map and timeline), and the junctions where ambulances lost the most time." },
     ],
   },

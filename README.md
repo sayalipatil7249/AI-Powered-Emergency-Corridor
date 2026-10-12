@@ -166,7 +166,7 @@ simulations and checks that a refactor did not change their results.
 │
 ├── frontend/                    React dashboard
 │   └── src/
-│       ├── Root.jsx             Pages: live map (#/), admin (#/admin), trip page (#/admin/trip/<id>)
+│       ├── Root.jsx             Pages: start page (#/), control room (#/control), crew (#/crew/<unit>), admin (#/admin), trip page (#/admin/trip/<id>)
 │       ├── App.jsx              Live page: trip planner, start/stop, WebSocket, playback speed
 │       ├── MapView.jsx          Live 2D Leaflet map
 │       ├── ChaseView.jsx        3D view with the camera following the ambulance (MapLibre GL)
@@ -278,8 +278,9 @@ Only `DATABASE_URL` is required; everything else is optional. `.env` is never co
 | `SIM_AREA` | `original` | `2x` for the larger 5.9 × 4.7 km map |
 | `SIM_TRAFFIC_LEVEL` | live / normal | `light`, `normal` or `heavy`: always use this traffic level (handy for demos) |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Websites allowed to call the API (set to the dashboard's address on a server) |
-| `ANTHROPIC_API_KEY` | none | Claude: "Ask AI", "Describe the emergency" and the AI agent. Without it those features say they are off. |
-| `ASSISTANT_MODEL`, `ASSISTANT_EFFORT` | `claude-opus-5-5`, `low` | Model and effort for "Ask AI" and the AI intake |
+| `GEMINI_API_KEYS`, `GEMINI_API_KEY` | none | Gemini chat and intake: comma-separated keys rotate in order; falls back to the single key if the list is empty. |
+| `ANTHROPIC_API_KEY` | none | Claude: the separate AI supervisor agent. |
+| `ASSISTANT_MODEL`, `ASSISTANT_EFFORT` | `gemini-3.5-flash`, `low` | Model and effort for "Ask AI" and the AI intake |
 | `AGENT_MODEL`, `AGENT_EFFORT` | `claude-opus-5`, `low` | Model and effort for the AI supervisor agent |
 | `TOMTOM_API_KEY` | none | Live Pune traffic (digital twin) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | none | Real phone calls to police (test phones only) |
@@ -318,7 +319,7 @@ npm run dev
 shows the route and its signals, with its length and time. With nothing chosen, Start runs
 the tested demo trip (Shukrawar Peth → Ruby Hall Clinic, along the fastest route).
 
-Open http://localhost:5173 and click **Start**. Traffic first builds up for 10
+Open http://localhost:5173, choose **108 Control room** and click **Start**. Traffic first builds up for 10
 simulated minutes (fast-forwarded, a few seconds of real time), then the ambulance departs.
 Watch the route panel and the map as signals ahead switch to green. The simulation stops by
 itself shortly after the ambulance arrives, or click **Stop**.
@@ -360,7 +361,7 @@ steps of [Setup](#setup).
 - Time zone: the app saves times in the server's local time, so set it to India time
   (e.g. `sudo timedatectl set-timezone Asia/Kolkata`, or `TZ=Asia/Kolkata` for the backend
   process); otherwise the admin pages show UTC.
-- Optional keys: `ANTHROPIC_API_KEY` (AI chat and intake), `TOMTOM_API_KEY` (live traffic),
+- Optional keys: `GEMINI_API_KEYS` or `GEMINI_API_KEY` (AI chat and intake), `TOMTOM_API_KEY` (live traffic),
   Twilio settings (police phone calls; `POLICE_CALLS=0` only logs them).
 
 **3. Backend:** run it **without `--reload`** and with **exactly one worker**. The live
@@ -714,9 +715,21 @@ Every trip event with a position (stops, signals, police) is also stored as a Po
 
 ### "Ask AI" chat
 
-The **Ask AI** button (bottom right of the main screen) opens a small chat about the running simulation: "Why is Ambulance 2 stopped?", "Which ambulance arrives first?", "Where are the police?". Each question is sent to Claude (`POST /assistant/ask`) with a trimmed snapshot of the live state (every ambulance's stage, ETA, delay reason and next signal, police alerts, recent messages, priority changes). Claude answers from that snapshot only, in one to three blunt sentences, and says so when the snapshot doesn't show the answer.
+The **Ask AI** button (bottom right of the main screen) opens a small chat about the running simulation: "Why is Ambulance 2 stopped?", "Which ambulance arrives first?", "Where are the police?". Each question is sent to Gemini (`POST /assistant/ask`) with a trimmed snapshot of the live state (every ambulance's stage, ETA, delay reason and next signal, police alerts, recent messages, priority changes). Gemini answers from that snapshot only, in one to three blunt sentences, and says so when the snapshot doesn't show the answer.
 
-Needs `ANTHROPIC_API_KEY` in `.env` and `pip install anthropic`. Without a key, the chat shows "AI chat is off". The model is `claude-opus-5-5` at low effort; override with `ASSISTANT_MODEL` / `ASSISTANT_EFFORT`.
+Uses Google's `google-genai` SDK (included in `requirements.txt`). Configure `.env`:
+
+```dotenv
+GEMINI_API_KEYS=your-first-key,your-second-key,your-third-key
+# Or use a single key:
+# GEMINI_API_KEY=your-single-key
+ASSISTANT_MODEL=gemini-3.5-flash
+ASSISTANT_EFFORT=low
+```
+
+A nonempty key list takes precedence. Chat and intake share a thread-safe round-robin sequence, initialized once per process; each worker has its own sequence. Each key has its own client. A request gets at most three attempts on that same key, with SDK backoff, including rate-limit errors. There is no failover to evade quotas. Restart the backend after changing configuration. Replace any old Claude `ASSISTANT_MODEL` override; `ASSISTANT_EFFORT` is now the Gemini thinking level. The separate supervisor agent still uses Anthropic.
+
+Verify without external AI calls: `python -m unittest discover -s tests -p 'test_assistant_key_rotation.py' -v`.
 
 ### Several ambulances: patient priority and the junction referee
 
@@ -919,12 +932,14 @@ not been retrained here. `SIM_AREA=original` in `.env` switches back to the firs
 
 ### Pages, trip records and grievances
 
-The frontend has four pages:
+Each role has its own page; the start page asks who is using the screen (in real use, a login):
 
 | Page | Address | What it is for |
 |---|---|---|
-| Live map | `#/` | Plan, start and watch trips |
-| Control room | `#/control-room` | Every ambulance live, the referee's decisions, the priority log, police contacts; override a patient's priority or stop the simulation (logged as "Control room") |
+| Start page | `#/` | Choose a role: 108 control room, an ambulance's crew, or admin |
+| 108 Control room | `#/control` | Take calls (AI reads the typed call, a person checks it), plan and start trips, watch every ambulance; test tools for the simulation |
+| Crew | `#/crew/<unit>` | The tablet in one ambulance (e.g. `#/crew/108-A2`, or `#/crew/1` for a demo trip): only that ambulance's job, big map, Call police, Report a problem |
+| Admin live view | `#/admin/live` (old address `#/control-room`) | Every ambulance live, the referee's decisions, the priority log, police contacts; override a patient's priority or stop the simulation (logged as "Control room") |
 | Admin dashboard | `#/admin` | Recorded trips over 7 days / 30 days / all time: KPIs, delay reasons, trends, route performance, problem junctions, and grievance tickets |
 | Trip page | `#/admin/trip/<request id>` | One trip on a map (planned route, path driven, stops) with its timeline |
 

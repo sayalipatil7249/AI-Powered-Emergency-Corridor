@@ -109,6 +109,9 @@
 }
 
 .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 38px;
   padding: 8px 10px;
 }
@@ -3342,4 +3345,566 @@ h2,
 
 .police-call-button:not(:disabled):hover {
   background: rgba(37, 99, 235, 0.1);
+}
+
+/* ================= Control room and crew screens ================= */
+
+/* Control room: the "Arrives in" card stays at the bottom of the left
+   column, in view even when the planner above it scrolls. */
+.nl-left > .eta {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  z-index: 1;
+}
+
+/* Control room: the simulation-only tools, in the right column. */
+.nl-test-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nl-test-tools .field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nl-test-tools .nl-speed {
+  align-self: flex-start;
+}
+
+/* Control room: planner | map | ambulances and updates. */
+.nl-control {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr) 340px;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+}
+
+.nl-control.map-expanded {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.nl-control.map-expanded > .panel {
+  display: none;
+}
+
+/* Crew: one card, a big map, two big buttons. */
+.nl-crew {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 0;
+}
+
+.nl-crew-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nl-crew-picker button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nl-crew-picker button.active {
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 3px var(--mustard-soft);
+}
+
+/* Trip card and the big "Arrives in" card, side by side. */
+.nl-crew-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+}
+
+.nl-crew-top > .eta {
+  margin: 0;
+  justify-content: center;
+}
+
+.nl-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 20px;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-left: 8px solid var(--muted);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.nl-card.tone-ok { border-left-color: var(--green); }
+.nl-card.tone-warn { border-left-color: var(--ready); }
+.nl-card.tone-bad { border-left-color: var(--red); }
+
+.nl-card-main,
+.nl-card-side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nl-card-side {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.nl-card-kicker {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nl-card-title {
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.nl-card-detail {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.nl-card.tone-ok .nl-card-detail { color: var(--text-green); }
+.nl-card.tone-bad .nl-card-detail { color: var(--text-red); }
+
+.nl-card-eta {
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.nl-card-eta-label,
+.nl-card-unit,
+.nl-card-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nl-card-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* The next signal's state as a coloured light (no emoji). */
+.nl-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nl-light {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--waiting);
+}
+
+.nl-light.green { background: var(--green); }
+.nl-light.ready { background: var(--ready); }
+.nl-light.passed { background: var(--muted); }
+
+.nl-hold.tone-bad { color: var(--text-red); }
+.nl-hold.tone-warn { color: var(--text-amber); }
+
+.nl-crew-map {
+  display: grid;
+  flex: 1;
+  min-height: 300px;
+}
+
+.nl-crew-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  /* Room for the floating Ask AI button on the right. */
+  padding-right: 120px;
+}
+
+.nl-big-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.nl-big-button small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nl-big-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nl-big-button.police:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.nl-big-button.police.urgent:not(:disabled) {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.nl-big-button.police.urgent small {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.nl-crew-message {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 1100px) {
+  .nl-control {
+    grid-template-columns: 320px minmax(0, 1fr);
+  }
+
+  .nl-control > .nl-right {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .nl-control {
+    grid-template-columns: 1fr;
+  }
+
+  .nl-control > .map-wrapper,
+  .nl-crew-map {
+    height: 60vh;
+  }
+
+  .nl-crew-top,
+  .nl-card {
+    grid-template-columns: 1fr;
+  }
+
+  .nl-card-side {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .nl-card-title {
+    font-size: 24px;
+  }
+
+  .nl-crew-actions {
+    grid-template-columns: 1fr;
+    padding-right: 0;
+    padding-bottom: 72px;
+  }
+}
+
+/* ================= New layout: role start page ================= */
+
+.nl-roles {
+  overflow-y: auto;
+  padding: 40px 24px;
+}
+
+.nl-roles-title {
+  text-align: center;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.nl-roles-note {
+  margin: 6px 0 28px;
+  text-align: center;
+}
+
+.nl-role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1fr;
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+.nl-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+a.nl-role-card:hover {
+  border-color: var(--mustard);
+  box-shadow: 0 0 0 3px var(--mustard-soft);
+}
+
+.nl-role-card strong {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.nl-role-card > span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.nl-role-card .nl-role-go {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.nl-unit-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.nl-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.nl-unit:hover {
+  border-color: var(--mustard);
+}
+
+.nl-unit span {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.nl-unit.demo {
+  border-style: dashed;
+}
+
+@media (max-width: 900px) {
+  .nl-role-grid,
+  .nl-unit-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================= New layout: AI check step ================= */
+
+.intake-check {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--mustard);
+  border-radius: 14px;
+  background: var(--mustard-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.intake-check.failed {
+  border-color: var(--red);
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--text-red);
+}
+
+.intake-check dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.intake-check dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.intake-check dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.intake-check .intake-guess {
+  color: var(--text-amber);
+  font-weight: 600;
+}
+
+.ai-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--mustard-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* New layout, control room: link from an ambulance to its crew screen. */
+.crew-screen-link {
+  align-self: flex-start;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+/* "Switch role", a small link beside the role name under the title. */
+.nl-switch-role {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.nl-switch-role:hover {
+  color: var(--mustard);
+}
+
+/* Planner: the busy roads the chosen route avoids. */
+.plan-avoids {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--mustard-soft);
+  font-size: 12.5px;
+}
+
+.plan-avoids span {
+  font-weight: 700;
+}
+
+.plan-avoids ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* Voice call: language, Record / Stop. */
+.voice-call {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.voice-call select {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-bg, var(--surface));
+  color: var(--text);
+  font: inherit;
+}
+
+.voice-call .button {
+  flex: 1;
+  justify-content: center;
+}
+
+.voice-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.voice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-dot { animation: none; }
+}
+
+.intake-check .intake-english {
+  font-style: italic;
+}
+
+/* Test tools: the demo trips. */
+.demo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.demo-button:hover {
+  border-color: var(--mustard);
+}
+
+.demo-button span {
+  color: var(--muted);
+  font-size: 12px;
 }

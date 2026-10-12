@@ -18,8 +18,8 @@ function AdminHeader({ title = "Admin", subtitle = "108 ambulance control and re
       <div className="header-actions">
         <ThemeToggle />
         {children}
-        <a className="button button-primary" href="#/">
-          Live map
+        <a className="button button-primary" href="#/control">
+          Control room
         </a>
       </div>
     </header>

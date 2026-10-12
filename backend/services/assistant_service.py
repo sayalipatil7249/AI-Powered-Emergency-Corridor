@@ -1,7 +1,7 @@
 """
 The "Ask" chat: answers questions about the live simulation.
 
-Claude gets a compact snapshot of what is happening right now (every
+Gemini gets a compact snapshot of what is happening right now (every
 ambulance, its stage, ETA and delay, police alerts, recent messages,
 priority changes) and answers from that only, so it cannot make up
 facts about the run.
@@ -11,14 +11,17 @@ import asyncio
 import json
 import logging
 import os
+from threading import Lock
 
-import anthropic
+import httpx
+from google import genai
+from google.genai import errors, types
 
 from backend.services.simulation_service import simulation_service
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.environ.get("ASSISTANT_MODEL", "claude-opus-5-5")
+MODEL = os.environ.get("ASSISTANT_MODEL", "gemini-3.5-flash")
 
 # Short questions about a snapshot: low effort keeps answers quick.
 EFFORT = os.environ.get("ASSISTANT_EFFORT", "low")
@@ -45,23 +48,82 @@ Style: blunt and short. One to three sentences, plain words, no headings, no lis
 
 
 class AssistantUnavailable(Exception):
-    """No credentials, or the Claude API could not answer."""
+    """No credentials, or the Gemini API could not answer."""
 
 
-_client = None
+class _ClientRotation:
+    """One process-wide sequence; each client keeps its own credentials."""
+
+    def __init__(self):
+        keys = tuple(
+            key.strip()
+            for key in os.environ.get("GEMINI_API_KEYS", "").split(",")
+            if key.strip()
+        )
+        single_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        self._keys = keys or ((single_key,) if single_key else ())
+        self._clients = {}
+        self._index = 0
+        self._lock = Lock()
+
+    def next_client(self):
+        # No await or network I/O under the lock. Never mutate a client's key.
+        with self._lock:
+            if not self._keys:
+                raise AssistantUnavailable(
+                    "AI is off: set GEMINI_API_KEYS or GEMINI_API_KEY in .env "
+                    "and restart the backend."
+                )
+            index = self._index
+            if index not in self._clients:
+                key = self._keys[index]
+                self._clients[index] = (
+                    genai.Client(
+                        api_key=key,
+                        vertexai=False,
+                        http_options=types.HttpOptions(
+                            # Three total attempts, with SDK exponential backoff.
+                            retry_options=types.HttpRetryOptions(attempts=3),
+                        ),
+                    )
+                )
+            self._index = (index + 1) % len(self._keys)
+            return self._clients[index]
+
+
+# Configuration is read once, after the backend's existing dotenv loading.
+_client_rotation = _ClientRotation()
 
 
 def _get_client():
-    global _client
-    if _client is None:
-        try:
-            # Reads ANTHROPIC_API_KEY (or an `ant auth login` profile).
-            _client = anthropic.AsyncAnthropic()
-        except (anthropic.AnthropicError, TypeError) as error:
-            raise AssistantUnavailable(
-                "AI chat is off: set ANTHROPIC_API_KEY in .env and restart the backend."
-            ) from error
-    return _client
+    return _client_rotation.next_client()
+
+
+async def _generate(client, contents, config):
+    """Retries stay on the selected client; never fail over on a quota error."""
+    try:
+        return await client.aio.models.generate_content(
+            model=MODEL, contents=contents, config=config,
+        )
+    except errors.APIError as error:
+        if error.code == 429:
+            raise AssistantUnavailable("Too many requests; try again in a minute.") from error
+        if error.code in (401, 403):
+            raise AssistantUnavailable("AI is off: the selected Gemini API key was rejected.") from error
+        # Do not log provider messages, which can contain request details.
+        logger.warning("Gemini API error %s.", error.code)
+        raise AssistantUnavailable(f"Gemini API error {error.code}.") from error
+    except httpx.RequestError as error:
+        raise AssistantUnavailable("Could not reach the Gemini API.") from error
+
+
+def _blocked(response):
+    return bool(
+        (response.prompt_feedback and response.prompt_feedback.block_reason)
+        or any(candidate.finish_reason in (
+            "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "RECITATION", "SPII",
+        ) for candidate in (response.candidates or []))
+    )
 
 
 def _ambulance(item):
@@ -115,7 +177,7 @@ def _police_alerts(state):
 
 
 def snapshot():
-    """What Claude sees: the live state, trimmed to what matters."""
+    """What Gemini sees: the live state, trimmed to what matters."""
     state = simulation_service.get_state()
     return {
         "status": state.get("status"),
@@ -156,51 +218,26 @@ async def ask(question, history=()):
         ),
     })
 
-    try:
-        response = await client.beta.messages.create(
-            model=MODEL,
-            max_tokens=4000,
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=messages,
-            output_config={"effort": EFFORT},
-            # If a safety classifier declines, retry server-side on
-            # Anthropic's recommended fallback model.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-    except TypeError as error:
-        # The SDK found no API key, auth token or profile at all.
-        raise AssistantUnavailable(
-            "AI chat is off: set ANTHROPIC_API_KEY in .env and restart the backend."
-        ) from error
-    except anthropic.AuthenticationError as error:
-        raise AssistantUnavailable(
-            "AI chat is off: the ANTHROPIC_API_KEY was rejected."
-        ) from error
-    except anthropic.RateLimitError as error:
-        raise AssistantUnavailable("Too many questions; try again in a minute.") from error
-    except anthropic.APIStatusError as error:
-        logger.warning("Claude API error %s for the chat.", error.status_code)
-        raise AssistantUnavailable(f"Claude API error {error.status_code}.") from error
-    except anthropic.APIConnectionError as error:
-        raise AssistantUnavailable("Could not reach the Claude API.") from error
-
-    if response.stop_reason == "refusal":
+    response = await _generate(
+        client,
+        [types.Content(
+            role="model" if turn["role"] == "assistant" else "user",
+            parts=[types.Part(text=turn["content"])],
+        ) for turn in messages],
+        types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=4000,
+            thinking_config=types.ThinkingConfig(thinking_level=EFFORT),
+        ),
+    )
+    if _blocked(response):
         return "I can't answer that."
-
-    answer = "".join(
-        block.text for block in response.content if block.type == "text"
-    ).strip()
-    return answer or "No answer."
+    return (response.text or "").strip() or "No answer."
 
 
 # ---------------------------------------------------------------------
 # Emergency request intake: the operator describes the emergency in
-# their own words; Claude picks out the place, the patient's condition
+# their own words; Gemini picks out the place, the patient's condition
 # and any hospital wish, and the deterministic planner does the rest
 # (find the place on the map, call the suitable hospitals). The AI only
 # fills in the planner: the operator checks it and presses Start, and
@@ -209,7 +246,13 @@ async def ask(question, history=()):
 
 INTAKE_PROMPT = """You turn an ambulance call into the fields of a dispatch form for Pune, India.
 
+The call may be in English, Hindi or Marathi (or a mix), typed or spoken
+(speech-to-text, so words may be misheard). Write every field in English,
+and place names in English letters as people in Pune spell them (e.g.
+"कसबा पेठ" -> "Kasba Peth", "शनिवार वाडा" -> "Shaniwar Wada").
+
 Pick out:
+- english: the caller's words translated into plain English (if already English, the same words, tidied).
 - place: where the patient is, in a few words, as in the message (e.g. "Crossword book store, FC Road"). Empty if not given.
 - landmark: only the building, shop or landmark name (e.g. "Crossword"); empty if none.
 - area: only the road or neighbourhood as people say it (e.g. "FC Road", "Kasba Peth"); empty if none.
@@ -234,6 +277,7 @@ def _intake_schema():
     return {
         "type": "object",
         "properties": {
+            "english": {"type": "string"},
             "place": {"type": "string"},
             "landmark": {"type": "string"},
             "area": {"type": "string"},
@@ -246,7 +290,7 @@ def _intake_schema():
             "summary": {"type": "string"},
             "reason": {"type": "string"},
         },
-        "required": ["place", "landmark", "area", "area_other_names", "locality", "condition", "hospital", "government_only",
+        "required": ["english", "place", "landmark", "area", "area_other_names", "locality", "condition", "hospital", "government_only",
                      "patient_on_board", "summary", "reason"],
         "additionalProperties": False,
     }
@@ -259,37 +303,33 @@ async def _extract(text):
         f"- {key}: {label} ({priority.LEVEL_NAMES[level]})"
         for key, (label, level) in priority.CONDITIONS.items()
     )
-    try:
-        response = await client.messages.create(
-            model=MODEL,
-            max_tokens=2000,
-            system=f"{INTAKE_PROMPT}\n\nConditions:\n{conditions}",
-            messages=[{"role": "user", "content": text}],
-            output_config={
-                "effort": EFFORT,
-                "format": {"type": "json_schema", "schema": _intake_schema()},
-            },
-        )
-    except TypeError as error:
-        raise AssistantUnavailable(
-            "AI is off: set ANTHROPIC_API_KEY in .env and restart the backend."
-        ) from error
-    except anthropic.AuthenticationError as error:
-        raise AssistantUnavailable("AI is off: the ANTHROPIC_API_KEY was rejected.") from error
-    except anthropic.RateLimitError as error:
-        raise AssistantUnavailable("Too many requests; try again in a minute.") from error
-    except anthropic.APIStatusError as error:
-        logger.warning("Claude API error %s for the intake.", error.status_code)
-        raise AssistantUnavailable(f"Claude API error {error.status_code}.") from error
-    except anthropic.APIConnectionError as error:
-        raise AssistantUnavailable("Could not reach the Claude API.") from error
-
-    if response.stop_reason == "refusal":
+    response = await _generate(
+        client,
+        [types.Content(role="user", parts=[types.Part(text=text)])],
+        types.GenerateContentConfig(
+            system_instruction=f"{INTAKE_PROMPT}\n\nConditions:\n{conditions}",
+            max_output_tokens=2000,
+            thinking_config=types.ThinkingConfig(thinking_level=EFFORT),
+            response_mime_type="application/json",
+            response_json_schema=_intake_schema(),
+        ),
+    )
+    if _blocked(response):
         raise IntakeError("The AI could not read this request. Fill in the form by hand.")
-    text_block = next((block.text for block in response.content if block.type == "text"), None)
-    if not text_block:
+    if not response.text:
         raise IntakeError("No answer from the AI. Fill in the form by hand.")
-    return json.loads(text_block)
+    try:
+        fields = json.loads(response.text)
+    except (ValueError, TypeError) as error:
+        raise IntakeError("The AI returned an incomplete form. Please try again.") from error
+    # Truncated or malformed output must not reach the deterministic planner.
+    schema = _intake_schema()
+    if not isinstance(fields, dict) or any(
+        key not in fields or not isinstance(fields[key], bool if spec['type'] == 'boolean' else str)
+        for key, spec in schema['properties'].items()
+    ) or fields['condition'] not in priority.CONDITIONS:
+        raise IntakeError("The AI returned an incomplete form. Please try again.")
+    return fields
 
 
 # A landmark found by name counts only this close to the road or area
@@ -423,6 +463,7 @@ def _plan_intake(fields):
         "government_only": fields["government_only"],
         "summary": fields["summary"],
         "reason": fields["reason"],
+        "english": fields["english"],
         "note": " ".join(item for item in (place_note, note) if item) or None,
         "calls": calls,
     }

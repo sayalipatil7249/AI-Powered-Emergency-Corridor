@@ -23,7 +23,6 @@ function TripPlanner({
   planning,
   planError,
   onFindRoute,
-  onUseDemo,
   disabled,
   liveLevel = "normal",
   conditions,
@@ -32,6 +31,9 @@ function TripPlanner({
   booked = [],
   fromBase = true,
   onFromBaseChange,
+  // New layout: fields the AI filled in ({start, condition, hospital}),
+  // tagged so the control room knows what to check.
+  aiFilled = null,
 }) {
   // The AI's trip estimate for the current live traffic level.
   const estimate = plan?.estimated_minutes?.[liveLevel] ?? null;
@@ -170,14 +172,12 @@ function TripPlanner({
     <section className="panel-section planner">
       <div className="section-heading">
         <h2>Plan a trip</h2>
-        {!disabled && (
-          <button className="link-button" onClick={onUseDemo}>
-            Demo route
-          </button>
-        )}
       </div>
 
-      <label className="field-label" htmlFor="trip-start">From (patient&apos;s location)</label>
+      <label className="field-label" htmlFor="trip-start">
+        From (patient&apos;s location)
+        {aiFilled?.start && <span className="ai-tag">AI · check</span>}
+      </label>
       <div className="field-row">
         <div className="search-box">
           <input
@@ -238,6 +238,7 @@ function TripPlanner({
 
       <label className="field-label" htmlFor="trip-condition">
         What happened to the patient?
+        {aiFilled?.condition && <span className="ai-tag">AI · check</span>}
       </label>
       <ConditionSelect
         id="trip-condition"
@@ -250,6 +251,7 @@ function TripPlanner({
       <div className="field-row hospital-heading">
         <label className="field-label" htmlFor="trip-hospital">
           Hospital{suitable ? ` · ${suitable.length} options` : ""}
+          {aiFilled?.hospital && <span className="ai-tag">AI · check</span>}
         </label>
         <label className="inline-check">
           <input
@@ -283,7 +285,7 @@ function TripPlanner({
             disabled={disabled || calling}
             onClick={() => callHospitals()}
           >
-            {calling ? "Calling hospitals…" : "📞 Call hospitals again"}
+            {calling ? "Calling hospitals…" : "Call hospitals again"}
           </button>
           {calls?.length > 0 && (
             <ul>
@@ -291,8 +293,8 @@ function TripPlanner({
                 <li key={call.name} className={`call-${call.answer}`}>
                   {call.name} ({call.drive_minutes < 1 ? "<1" : call.drive_minutes} min):{" "}
                   {call.answer === "accepted"
-                    ? `✓ yes, ${call.need_label.toLowerCase()} ready`
-                    : `✗ no, ${call.need_label.toLowerCase()} busy`}
+                    ? `Yes, ${call.need_label.toLowerCase()} ready`
+                    : `No, ${call.need_label.toLowerCase()} busy`}
                 </li>
               ))}
             </ul>
@@ -317,7 +319,7 @@ function TripPlanner({
         <div className="plan-summary">
           {plan.base && (
             <span className="plan-journey">
-              🚑 Ambulance {plan.unit ? `${plan.unit.id} (${plan.unit.kind === "ALS" ? "advanced" : "basic"})` : ""}
+              Ambulance {plan.unit ? `${plan.unit.id} (${plan.unit.kind === "ALS" ? "advanced" : "basic"})` : ""}
               {plan.unit ? ` from ${plan.unit.station}` : ` from ${plan.base.name}`}: reaches the patient in{" "}
               {plan.minutes_to_patient < 1 ? "under 1" : plan.minutes_to_patient} min, then{" "}
               {plan.minutes_to_hospital} min to the hospital
@@ -343,7 +345,27 @@ function TripPlanner({
               ? ` · about ${Math.round(estimate)} min`
               : ` · about ${plan.minutes_without_traffic} min with no traffic`}
           </strong>
+          {plan.routing?.avoids?.length > 0 && (
+            <div className="plan-avoids">
+              <span>Avoids busy roads:</span>
+              <ul>
+                {plan.routing.avoids.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            </div>
+          )}
           <Collapsible title="More about this route">
+          {plan.routing && (
+            <span>
+              {{
+                forecast: "Fastest route in today's traffic, using an AI forecast of how busy each road will be when the ambulance gets there.",
+                simulation: "Fastest route in live traffic right now.",
+                tomtom: "Fastest route in live TomTom traffic: avoids slow and closed roads.",
+                "speed limits": "No live traffic yet: route chosen on speed limits.",
+              }[plan.routing.basis]}
+              {plan.routing.live_minutes != null &&
+                ` About ${Math.round(plan.routing.live_minutes)} min in today's traffic.`}
+            </span>
+          )}
           {estimate && (
             <span>
               Time guessed for {liveLevelName} traffic now. Light traffic:{" "}
@@ -369,7 +391,7 @@ function TripPlanner({
                 {plan.police_along_route.map((station) => (
                   <li key={station.name}>
                     <strong>{station.name}</strong>
-                    {station.phone ? ` · 📞 ${station.phone}` : ""}
+                    {station.phone ? ` · Phone ${station.phone}` : ""}
                     {" · "}
                     {station.covers
                       .map(

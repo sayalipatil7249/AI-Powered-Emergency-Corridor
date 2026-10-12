@@ -1,6 +1,3 @@
-import { useState } from "react";
-
-import Collapsible from "./Collapsible";
 import ConditionSelect from "./ConditionSelect";
 import { ambulanceColor, LEVEL_CLASS } from "../fleet";
 
@@ -18,11 +15,9 @@ function BookingList({
   canBookTrip,
   tripLabel,
   onBookTrip,
-  onBookCrossing,
   onRemove,
   onViewRoute,
 }) {
-  const [crossingCondition, setCrossingCondition] = useState("stable");
   const full = bookings.length >= maxAmbulances;
   const describe = (booking) =>
     conditions.find((item) => item.condition === booking.condition);
@@ -89,7 +84,7 @@ function BookingList({
       {previewBusy && <p className="field-hint" role="status">Checking the routes…</p>}
       {previewError && <div role="alert"><p className="field-error">{previewError}</p>
         <button className="button button-secondary" onClick={onRetryPreview}>Try again</button></div>}
-      {preview && <p className="field-hint">{preview.shared_junctions.length} junctions where they meet (marked on the map).</p>}
+      {preview && <p className="field-hint">{preview.shared_junctions.length} {preview.shared_junctions.length === 1 ? "junction" : "junctions"} where they meet (marked on the map).</p>}
       <div className="fleet-add">
         <button
           className="button button-secondary"
@@ -99,28 +94,6 @@ function BookingList({
         >
           + Add as Ambulance {bookings.length + 1}
         </button>
-
-        <Collapsible title="Test tools" hint="ambulances meeting">
-          <span className="field-label">
-            An ambulance that meets Ambulance 1 at a signal
-          </span>
-          <ConditionSelect
-            conditions={conditions}
-            value={crossingCondition}
-            disabled={disabled || full}
-            onChange={setCrossingCondition}
-          />
-          <button
-            className="button button-secondary"
-            disabled={disabled || full || bookings.length === 0}
-            onClick={() => onBookCrossing(crossingCondition)}
-          >
-            + Add it
-          </button>
-          {bookings.length === 0 && (
-            <span className="muted">Add Ambulance 1 first.</span>
-          )}
-        </Collapsible>
         {full && (
           <span className="muted">At most {maxAmbulances} ambulances at once.</span>
         )}

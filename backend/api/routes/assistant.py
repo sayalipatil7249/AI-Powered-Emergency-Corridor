@@ -1,5 +1,5 @@
 """
-The "Ask" chat: questions about the live simulation, answered by Claude
+The "Ask" chat: questions about the live simulation, answered by Gemini
 from the current state.
 """
 

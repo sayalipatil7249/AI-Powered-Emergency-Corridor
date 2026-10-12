@@ -4,8 +4,11 @@ import App from "./App.jsx";
 import AdminDashboard from "./admin/AdminDashboard.jsx";
 import AdminPage from "./admin/AdminPage.jsx";
 import TripDetail from "./admin/TripDetail.jsx";
+import RolePicker from "./RolePicker.jsx";
 
-// Pages: the live map (#/); the admin dashboard, complaints and trips
+// Pages: "who is using this screen?" (#/), the 108 control room
+// (#/control), one ambulance's crew screen (#/crew/<unit>; #/new/...
+// are their old addresses); the admin dashboard, complaints and trips
 // (#/admin); the live control room (#/admin/live); one trip's details
 // (#/admin/trip/<request id>).
 function Root() {
@@ -29,7 +32,17 @@ function Root() {
   if (hash.startsWith("#/admin")) {
     return <AdminDashboard />;
   }
-  return <App />;
+  // One App for both, so the control room's planned trip survives
+  // switching role in the same tab.
+  const page = hash.replace(/^#\/new(?=\/)/, "#");
+  if (page.startsWith("#/control")) {
+    return <App tab="control" />;
+  }
+  if (page.startsWith("#/crew/")) {
+    const unit = decodeURIComponent(page.slice("#/crew/".length));
+    return <App tab="crew" unit={unit} />;
+  }
+  return <RolePicker />;
 }
 
 export default Root;
